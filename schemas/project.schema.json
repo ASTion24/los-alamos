@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://los-alamos.local/schemas/project.schema.json",
+  "title": "Los Alamos LongTailProject",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "title",
+    "brief",
+    "goal",
+    "closeCriteria",
+    "currentState",
+    "unknowns",
+    "taskGraph",
+    "completionPercent",
+    "confidence",
+    "compact",
+    "createdAt",
+    "updatedAt",
+    "updatedBy",
+    "revision"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "brief": { "type": "string" },
+    "goal": { "type": "string" },
+    "closeCriteria": { "type": "array", "items": { "type": "string" } },
+    "currentState": { "type": "string" },
+    "unknowns": { "type": "array", "items": { "type": "string" } },
+    "taskGraph": {
+      "type": "object",
+      "required": ["tasks"],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "description",
+              "status",
+              "dependsOn",
+              "effortMinutes",
+              "intensity",
+              "weight",
+              "progressPercent",
+              "completionCriteria",
+              "startAction",
+              "notDoing"
+            ],
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "status": {
+                "enum": ["todo", "in_progress", "done", "parked", "killed", "unknown"]
+              },
+              "dependsOn": { "type": "array", "items": { "type": "string" } },
+              "effortMinutes": { "type": "number", "minimum": 1 },
+              "intensity": { "enum": ["low", "medium", "high", "xhigh"] },
+              "weight": { "type": "number", "minimum": 0 },
+              "progressPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+              "completionCriteria": { "type": "string" },
+              "startAction": { "type": "string" },
+              "notDoing": { "type": "string" },
+              "notes": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "completionPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "compact": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" },
+    "updatedBy": { "enum": ["user", "app", "agent", "llm"] },
+    "revision": { "type": "number", "minimum": 1 },
+    "archivedAt": { "type": "string" }
+  }
+}

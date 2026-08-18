@@ -1,0 +1,15 @@
+node_modules/
+.tools/
+out/
+dist/
+release/
+workspace/
+.vite/
+.vitest/
+coverage/
+*.log
+.DS_Store
+.env
+.env.*
+*.tmp
+随笔.txt

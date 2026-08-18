@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+CLI="$ROOT/out/agent/los.mjs"
+
+if command -v node >/dev/null 2>&1; then
+  RUNTIME="$(command -v node)"
+elif [ -x "$ROOT/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" ]; then
+  RUNTIME="$ROOT/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+  export ELECTRON_RUN_AS_NODE=1
+elif [ -x "/Applications/Los Alamos.app/Contents/MacOS/Los Alamos" ]; then
+  RUNTIME="/Applications/Los Alamos.app/Contents/MacOS/Los Alamos"
+  export ELECTRON_RUN_AS_NODE=1
+else
+  printf '%s\n' "Los Alamos requires Node.js or the Los Alamos desktop app." >&2
+  exit 127
+fi
+
+if [ ! -f "$CLI" ]; then
+  "$RUNTIME" "$ROOT/scripts/build-agent-cli.mjs"
+fi
+
+exec "$RUNTIME" "$CLI" "$@"

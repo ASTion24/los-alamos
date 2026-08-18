@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://los-alamos.local/schemas/event.schema.json",
+  "title": "Los Alamos ProjectEvent",
+  "type": "object",
+  "required": ["schemaVersion", "id", "projectId", "kind", "at", "actor", "summary"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "projectId": { "type": "string" },
+    "sessionId": { "type": "string" },
+    "kind": {
+      "enum": [
+        "project.created",
+        "project.updated",
+        "project.archived",
+        "project.restored",
+        "session.proposed",
+        "session.started",
+        "session.cancelled",
+        "session.closed",
+        "task.updated"
+      ]
+    },
+    "at": { "type": "string" },
+    "actor": { "enum": ["user", "app", "agent", "llm"] },
+    "summary": { "type": "string" }
+  }
+}

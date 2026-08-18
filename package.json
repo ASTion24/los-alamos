@@ -1,0 +1,75 @@
+{
+  "name": "los-alamos",
+  "version": "0.1.0",
+  "private": true,
+  "author": "xuanran.916",
+  "description": "A quiet desktop workspace for closing long-tail projects through LLM-assisted context compacting.",
+  "main": "out/main/index.js",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:renderer": "vite --config vite.renderer.config.ts",
+    "build": "tsc --noEmit && electron-vite build && node scripts/build-agent-cli.mjs",
+    "preview": "electron-vite preview",
+    "los": "tsx packages/cli/src/index.ts",
+    "test": "vitest run",
+    "pack": "npm run build && electron-builder --mac dir",
+    "dist": "npm run build && electron-builder --mac dmg"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "esbuild": "^0.28.2",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "studio.losalamos.desktop",
+    "productName": "Los Alamos",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "beforeBuild": "scripts/electron-builder.cjs",
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      "README.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "schemas",
+      "skills",
+      {
+        "from": ".trae/skills",
+        "to": ".trae/skills"
+      },
+      {
+        "from": "out/agent",
+        "to": "agent"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "target": [
+        "dir",
+        "dmg"
+      ]
+    }
+  }
+}
