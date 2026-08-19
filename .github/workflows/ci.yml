@@ -70,8 +70,8 @@ jobs:
       - name: Install Linux packaging and runtime dependencies
         if: matrix.platform == 'linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes dbus-x11 gnome-keyring libsecret-1-0 xvfb
+          sudo apt-get install --yes --no-install-recommends \
+            dbus-x11 gnome-keyring libsecret-1-0 xvfb
 
       - name: Build native packages
         run: npm run ${{ matrix.build-script }}
