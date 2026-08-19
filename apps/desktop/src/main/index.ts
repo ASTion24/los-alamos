@@ -455,7 +455,7 @@ function cancelSessionDeadline(sessionId: string): void {
 
 app.whenReady().then(async () => {
   if (app.isPackaged) {
-    process.env.LOS_ALAMOS_WORKSPACE = join(app.getPath("documents"), "Los Alamos");
+    process.env.LOS_ALAMOS_WORKSPACE ??= join(app.getPath("documents"), "Los Alamos");
     process.env.LOS_ALAMOS_PROTOCOL_ROOT = process.resourcesPath;
   }
   registerIpc();

@@ -16,7 +16,7 @@ Los Alamos 是一个用于关闭长尾项目的本地桌面工作区。
 
 ### 原生应用
 
-打开 macOS 应用后，可以直接在界面中：
+打开 macOS、Windows 或 Linux 应用后，可以直接在界面中：
 
 - 添加项目并审阅任务依赖图；
 - 调整任务边界、强度、预计时间与进度；
@@ -24,7 +24,8 @@ Los Alamos 是一个用于关闭长尾项目的本地桌面工作区。
 - 审阅、开始和结束驻留；
 - 查看项目总览、归档与驻留记录。
 
-应用数据位于 `~/Documents/Los Alamos/`，API 密钥单独保存在系统安全存储中。
+应用数据位于系统“文稿/Documents”目录下的 `Los Alamos/`。API 密钥通过 Electron
+`safeStorage` 保存；Linux 桌面应启用 Secret Service 或 KWallet 等系统密钥环。
 
 ### Agent workspace
 
@@ -43,6 +44,8 @@ Los Alamos 是一个用于关闭长尾项目的本地桌面工作区。
 ```
 
 Windows 使用 `.los\los.cmd`。启动器不依赖 npm；缺少系统 Node 时会复用 Los Alamos 自身的 Electron Runtime。
+macOS 与 Linux 使用 `.los/los`。源码工作区还会自动发现系统中已安装的
+`Los Alamos.app` 或 `los-alamos`。
 
 两条路径共享同一个 workspace，可以随时切换，不需要导入、导出或同步。
 
@@ -76,12 +79,25 @@ npm run dev
 npm test
 npm run build
 npm run pack
+npm run dist
 ```
 
-macOS arm64 本地构建产物位于：
+`pack` 生成当前平台的未封装目录，`dist` 生成当前平台的安装包。也可以显式运行：
 
-```text
-release/mac-arm64/Los Alamos.app
+```bash
+npm run dist:mac
+npm run dist:win
+npm run dist:linux
 ```
 
-源码仓库不会提交本地 `workspace/` 数据或 `release/` 构建产物。打包应用的正式数据默认位于 `~/Documents/Los Alamos/`。
+发行目标：
+
+- macOS：DMG、ZIP；
+- Windows：NSIS Setup、portable EXE；
+- Linux：AppImage、Debian `.deb`。
+
+各平台构建应在对应原生系统中执行。GitHub Actions 会在 macOS、Windows 和 Ubuntu
+runner 上完成冷安装，并验证应用启动、preload/IPC、系统安全存储、Agent Runtime
+与 GUI 页面控制。产物统一写入 `release/`。
+
+源码仓库不会提交本地 `workspace/` 数据或 `release/` 构建产物。打包应用的正式数据默认位于系统“文稿/Documents”目录下的 `Los Alamos/`。

@@ -10,13 +10,13 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 20.19.1
           cache: npm
@@ -24,3 +24,157 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+
+  package:
+    needs: verify
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-14
+            build-script: dist:mac
+          - platform: windows
+            runner: windows-latest
+            build-script: dist:win
+          - platform: linux
+            runner: ubuntu-24.04
+            build-script: dist:linux
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.19.1
+          cache: npm
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Configure smoke output
+        shell: bash
+        run: printf 'LOS_ALAMOS_SMOKE_OUTPUT=%s\n' "$RUNNER_TEMP/los-alamos-smoke" >> "$GITHUB_ENV"
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Install smoke test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-smoke.txt
+
+      - name: Install Linux packaging and runtime dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb libsecret-1-0
+
+      - name: Build native packages
+        run: npm run ${{ matrix.build-script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Install macOS package
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="$(find release -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          zip="$(find release -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$dmg"
+          test -n "$zip"
+          mount_point="$RUNNER_TEMP/los-alamos-dmg"
+          installed_app="$RUNNER_TEMP/Los Alamos.app"
+          mkdir -p "$mount_point"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_point"
+          source_app="$(find "$mount_point" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$source_app"
+          ditto "$source_app" "$installed_app"
+          hdiutil detach "$mount_point"
+          executable="$installed_app/Contents/MacOS/Los Alamos"
+          test -x "$executable"
+          printf 'LOS_ALAMOS_PACKAGED_EXECUTABLE=%s\n' "$executable" >> "$GITHUB_ENV"
+
+      - name: Install Windows package
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem release -File -Filter "*-Setup.exe" | Select-Object -First 1
+          $portable = Get-ChildItem release -File -Filter "*-Portable.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer was not produced." }
+          if (-not $portable) { throw "Portable executable was not produced." }
+          $installDir = Join-Path $env:RUNNER_TEMP "LosAlamos"
+          $process = Start-Process -FilePath $installer.FullName `
+            -ArgumentList "/S", "/D=$installDir" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "NSIS installer exited with code $($process.ExitCode)."
+          }
+          $executable = Join-Path $installDir "Los Alamos.exe"
+          if (-not (Test-Path $executable -PathType Leaf)) {
+            throw "Installed executable not found at $executable."
+          }
+          "LOS_ALAMOS_PACKAGED_EXECUTABLE=$executable" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LOS_ALAMOS_PORTABLE_EXECUTABLE=$($portable.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install Linux package
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$(find release -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          appimage="$(find release -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$deb"
+          test -n "$appimage"
+          chmod +x "$appimage"
+          sudo apt-get install --yes "$PWD/$deb"
+          executable="$(command -v los-alamos)"
+          test -x "$executable"
+          printf 'LOS_ALAMOS_PACKAGED_EXECUTABLE=%s\n' "$executable" >> "$GITHUB_ENV"
+          printf 'LOS_ALAMOS_PORTABLE_EXECUTABLE=%s\n' "$PWD/$appimage" >> "$GITHUB_ENV"
+
+      - name: Run packaged application smoke test
+        if: matrix.platform != 'linux'
+        run: python scripts/packaged_smoke.py
+
+      - name: Run packaged application smoke test on Linux
+        if: matrix.platform == 'linux'
+        run: xvfb-run --auto-servernum python scripts/packaged_smoke.py
+
+      - name: Run Windows portable smoke test
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $env:LOS_ALAMOS_PACKAGED_EXECUTABLE = $env:LOS_ALAMOS_PORTABLE_EXECUTABLE
+          python scripts/packaged_smoke.py
+
+      - name: Run AppImage smoke test
+        if: matrix.platform == 'linux'
+        run: |
+          LOS_ALAMOS_PACKAGED_EXECUTABLE="$LOS_ALAMOS_PORTABLE_EXECUTABLE" \
+          APPIMAGE_EXTRACT_AND_RUN=1 \
+          xvfb-run --auto-servernum python scripts/packaged_smoke.py
+
+      - name: Upload packages and smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: los-alamos-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*-Setup.exe
+            release/*-Portable.exe
+            release/*.AppImage
+            release/*.deb
+            ${{ runner.temp }}/los-alamos-smoke/*.png
+            ${{ runner.temp }}/los-alamos-smoke/*.log

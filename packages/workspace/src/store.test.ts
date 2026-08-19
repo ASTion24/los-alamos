@@ -348,4 +348,41 @@ describe("workspace store", () => {
     expect(launcher).toContain("LOS_ALAMOS_DESKTOP_EXECUTABLE");
     expect(runtime).toContain("console.log('ok')");
   });
+
+  it("persists the stable Windows portable executable in workspace launchers", async () => {
+    const sourceRoot = await workspace();
+    const root = await workspace();
+    await mkdir(join(sourceRoot, "agent"), { recursive: true });
+    await writeFile(join(sourceRoot, "agent", "los.mjs"), "console.log('ok');\n", "utf8");
+    await writeFile(join(sourceRoot, "agent", "package.json"), "{}\n", "utf8");
+    const previousProtocolRoot = process.env.LOS_ALAMOS_PROTOCOL_ROOT;
+    const previousPortableExecutable = process.env.PORTABLE_EXECUTABLE_FILE;
+    process.env.LOS_ALAMOS_PROTOCOL_ROOT = sourceRoot;
+    process.env.PORTABLE_EXECUTABLE_FILE = "C:\\Tools\\Los Alamos Portable.exe";
+    try {
+      await createProject({
+        title: "Portable pilot",
+        brief: "The portable runtime must remain discoverable after exit.",
+        workspaceRoot: root
+      });
+    } finally {
+      if (previousProtocolRoot === undefined) {
+        delete process.env.LOS_ALAMOS_PROTOCOL_ROOT;
+      } else {
+        process.env.LOS_ALAMOS_PROTOCOL_ROOT = previousProtocolRoot;
+      }
+      if (previousPortableExecutable === undefined) {
+        delete process.env.PORTABLE_EXECUTABLE_FILE;
+      } else {
+        process.env.PORTABLE_EXECUTABLE_FILE = previousPortableExecutable;
+      }
+    }
+
+    const launcher = await readFile(join(root, ".los", "los.cmd"), "utf8");
+
+    expect(launcher).toContain(
+      'set "LOS_ALAMOS_DESKTOP_EXECUTABLE=C:\\Tools\\Los Alamos Portable.exe"'
+    );
+    expect(launcher).toContain('"C:\\Tools\\Los Alamos Portable.exe" "%~dp0los.mjs" %*');
+  });
 });

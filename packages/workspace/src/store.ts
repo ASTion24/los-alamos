@@ -772,7 +772,8 @@ async function syncPublicProtocol(workspaceRoot: string): Promise<void> {
   }
 
   if (await exists(join(workspaceRoot, ".los", "los.mjs"))) {
-    const runtime = process.execPath.replace(/'/g, "'\\''");
+    const desktopExecutable = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+    const runtime = desktopExecutable.replace(/'/g, "'\\''");
     const desktopArgument = process.env.LOS_ALAMOS_PROTOCOL_ROOT
       ? ""
       : process.cwd().replace(/'/g, "'\\''");
@@ -793,7 +794,7 @@ exit 127
 `;
     const windowsLauncher = `@echo off
 setlocal
-set "LOS_ALAMOS_DESKTOP_EXECUTABLE=${process.execPath}"
+set "LOS_ALAMOS_DESKTOP_EXECUTABLE=${desktopExecutable}"
 set "LOS_ALAMOS_DESKTOP_ARGUMENT=${process.env.LOS_ALAMOS_PROTOCOL_ROOT ? "" : process.cwd()}"
 where node >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
@@ -801,7 +802,7 @@ if %ERRORLEVEL% EQU 0 (
   exit /b %ERRORLEVEL%
 )
 set ELECTRON_RUN_AS_NODE=1
-"${process.execPath}" "%~dp0los.mjs" %*
+"${desktopExecutable}" "%~dp0los.mjs" %*
 `;
     const launcherPath = join(workspaceRoot, ".los", "los");
     await writeFile(launcherPath, launcher, "utf8");

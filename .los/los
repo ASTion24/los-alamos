@@ -9,6 +9,12 @@ if command -v node >/dev/null 2>&1; then
 elif [ -x "$ROOT/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" ]; then
   RUNTIME="$ROOT/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
   export ELECTRON_RUN_AS_NODE=1
+elif [ -x "$ROOT/node_modules/electron/dist/electron" ]; then
+  RUNTIME="$ROOT/node_modules/electron/dist/electron"
+  export ELECTRON_RUN_AS_NODE=1
+elif command -v los-alamos >/dev/null 2>&1; then
+  RUNTIME="$(command -v los-alamos)"
+  export ELECTRON_RUN_AS_NODE=1
 elif [ -x "/Applications/Los Alamos.app/Contents/MacOS/Los Alamos" ]; then
   RUNTIME="/Applications/Los Alamos.app/Contents/MacOS/Los Alamos"
   export ELECTRON_RUN_AS_NODE=1
