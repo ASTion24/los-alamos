@@ -385,4 +385,42 @@ describe("workspace store", () => {
     );
     expect(launcher).toContain('"C:\\Tools\\Los Alamos Portable.exe" "%~dp0los.mjs" %*');
   });
+
+  it("creates a persistent runtime fallback for Linux AppImages", async () => {
+    const sourceRoot = await workspace();
+    const root = await workspace();
+    await mkdir(join(sourceRoot, "agent"), { recursive: true });
+    await writeFile(join(sourceRoot, "agent", "los.mjs"), "console.log('ok');\n", "utf8");
+    await writeFile(join(sourceRoot, "agent", "package.json"), "{}\n", "utf8");
+    const previousProtocolRoot = process.env.LOS_ALAMOS_PROTOCOL_ROOT;
+    const previousAppImage = process.env.APPIMAGE;
+    process.env.LOS_ALAMOS_PROTOCOL_ROOT = sourceRoot;
+    process.env.APPIMAGE = "/opt/Los Alamos.AppImage";
+    try {
+      await createProject({
+        title: "AppImage pilot",
+        brief: "The AppImage runtime must remain discoverable after exit.",
+        workspaceRoot: root
+      });
+    } finally {
+      if (previousProtocolRoot === undefined) {
+        delete process.env.LOS_ALAMOS_PROTOCOL_ROOT;
+      } else {
+        process.env.LOS_ALAMOS_PROTOCOL_ROOT = previousProtocolRoot;
+      }
+      if (previousAppImage === undefined) {
+        delete process.env.APPIMAGE;
+      } else {
+        process.env.APPIMAGE = previousAppImage;
+      }
+    }
+
+    const launcher = await readFile(join(root, ".los", "los"), "utf8");
+
+    expect(launcher).toContain(
+      "export LOS_ALAMOS_DESKTOP_EXECUTABLE='/opt/Los Alamos.AppImage'"
+    );
+    expect(launcher).toContain('"$LOS_ALAMOS_DESKTOP_EXECUTABLE" --appimage-extract');
+    expect(launcher).toContain('exec "$runtime_binary" "$SCRIPT_DIR/los.mjs" "$@"');
+  });
 });

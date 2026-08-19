@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -88,7 +89,7 @@ def request_open(workspace_root: Path, target: str, item_id: Optional[str] = Non
     temporary_path.replace(request_path)
 
 
-def verify_agent_runtime(executable: Path, workspace_root: Path) -> None:
+def verify_agent_runtime(workspace_root: Path) -> None:
     runtime = workspace_root / ".los" / "los.mjs"
     assert runtime.is_file()
     assert (workspace_root / "README.md").is_file()
@@ -98,23 +99,25 @@ def verify_agent_runtime(executable: Path, workspace_root: Path) -> None:
     assert launcher.is_file()
 
     environment = os.environ.copy()
-    environment["ELECTRON_RUN_AS_NODE"] = "1"
     environment["LOS_ALAMOS_WORKSPACE"] = str(workspace_root)
+    environment["LOS_ALAMOS_FORCE_DESKTOP_RUNTIME"] = "1"
+    command = [
+        str(launcher),
+        "agent",
+        "capabilities",
+        "--json",
+    ]
+    if sys.platform == "win32":
+        command = ["cmd.exe", "/d", "/s", "/c", *command]
     result = subprocess.run(
-        [
-            str(executable),
-            str(runtime),
-            "agent",
-            "capabilities",
-            "--json",
-        ],
+        command,
         cwd=workspace_root,
         env=environment,
         capture_output=True,
         check=True,
         encoding="utf8",
         text=True,
-        timeout=30,
+        timeout=90,
     )
     capabilities = json.loads(result.stdout)
     assert capabilities["protocolVersion"] == "1"
@@ -124,6 +127,15 @@ def verify_agent_runtime(executable: Path, workspace_root: Path) -> None:
 def terminate(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/pid", str(process.pid), "/t", "/f"],
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
+        process.wait(timeout=10)
+        return
     process.terminate()
     try:
         process.wait(timeout=10)
@@ -132,8 +144,19 @@ def terminate(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
+def cleanup_temporary(path: Path) -> None:
+    for attempt in range(10):
+        try:
+            shutil.rmtree(path)
+            return
+        except PermissionError:
+            if sys.platform != "win32":
+                raise
+            time.sleep(0.25 * (attempt + 1))
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def run_smoke(
-    executable: Path,
     port: int,
     workspace_root: Path,
     user_data: Path,
@@ -185,7 +208,7 @@ def run_smoke(
         assert page.locator(".workspace-count").count() == 0
         actual_workspace = Path(page.evaluate("window.los.workspaceRoot()"))
         assert actual_workspace.resolve() == workspace_root.resolve()
-        verify_agent_runtime(executable, actual_workspace)
+        verify_agent_runtime(actual_workspace)
 
         projects = page.evaluate("window.los.listProjects()")
         if health["projectCount"] <= 1:
@@ -261,8 +284,8 @@ def main() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     port = free_port()
 
-    with tempfile.TemporaryDirectory(prefix="los-alamos-packaged-smoke-") as temporary:
-        temporary_root = Path(temporary)
+    temporary_root = Path(tempfile.mkdtemp(prefix="los-alamos-packaged-smoke-"))
+    try:
         user_data = temporary_root / "user-data"
         workspace_root = temporary_root / "workspace"
         environment = os.environ.copy()
@@ -295,9 +318,11 @@ def main() -> None:
             )
             try:
                 wait_for_cdp(port, process, LOG)
-                run_smoke(executable, port, workspace_root, user_data)
+                run_smoke(port, workspace_root, user_data)
             finally:
                 terminate(process)
+    finally:
+        cleanup_temporary(temporary_root)
 
     print(
         f"packaged smoke passed on {sys.platform}; executable: {executable}; "

@@ -772,7 +772,8 @@ async function syncPublicProtocol(workspaceRoot: string): Promise<void> {
   }
 
   if (await exists(join(workspaceRoot, ".los", "los.mjs"))) {
-    const desktopExecutable = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+    const desktopExecutable =
+      process.env.APPIMAGE || process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
     const runtime = desktopExecutable.replace(/'/g, "'\\''");
     const desktopArgument = process.env.LOS_ALAMOS_PROTOCOL_ROOT
       ? ""
@@ -782,13 +783,39 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 export LOS_ALAMOS_DESKTOP_EXECUTABLE='${runtime}'
 export LOS_ALAMOS_DESKTOP_ARGUMENT='${desktopArgument}'
-if command -v node >/dev/null 2>&1; then
+if [ "\${LOS_ALAMOS_FORCE_DESKTOP_RUNTIME:-}" != "1" ] && command -v node >/dev/null 2>&1; then
   exec node "$SCRIPT_DIR/los.mjs" "$@"
 fi
-if [ -x '${runtime}' ]; then
-  export ELECTRON_RUN_AS_NODE=1
-  exec '${runtime}' "$SCRIPT_DIR/los.mjs" "$@"
-fi
+case "$LOS_ALAMOS_DESKTOP_EXECUTABLE" in
+  *.AppImage)
+    cache_base="\${XDG_CACHE_HOME:-\${HOME:-/tmp}/.cache}"
+    signature="$(ls -dn "$LOS_ALAMOS_DESKTOP_EXECUTABLE" | cksum | cut -d ' ' -f 1)"
+    runtime_dir="$cache_base/los-alamos/appimage-$signature"
+    runtime_binary="$runtime_dir/los-alamos"
+    if [ ! -x "$runtime_binary" ]; then
+      temporary_dir="$(mktemp -d "\${TMPDIR:-/tmp}/los-alamos-appimage.XXXXXX")"
+      trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
+      (
+        cd "$temporary_dir"
+        "$LOS_ALAMOS_DESKTOP_EXECUTABLE" --appimage-extract >/dev/null
+      )
+      mkdir -p "$(dirname "$runtime_dir")"
+      if [ ! -d "$runtime_dir" ]; then
+        mv "$temporary_dir/squashfs-root" "$runtime_dir"
+      fi
+      rm -rf "$temporary_dir"
+      trap - EXIT HUP INT TERM
+    fi
+    export ELECTRON_RUN_AS_NODE=1
+    exec "$runtime_binary" "$SCRIPT_DIR/los.mjs" "$@"
+    ;;
+  *)
+    if [ -x "$LOS_ALAMOS_DESKTOP_EXECUTABLE" ]; then
+      export ELECTRON_RUN_AS_NODE=1
+      exec "$LOS_ALAMOS_DESKTOP_EXECUTABLE" "$SCRIPT_DIR/los.mjs" "$@"
+    fi
+    ;;
+esac
 printf '%s\\n' "Los Alamos requires Node.js or the Los Alamos desktop app." >&2
 exit 127
 `;
@@ -796,10 +823,12 @@ exit 127
 setlocal
 set "LOS_ALAMOS_DESKTOP_EXECUTABLE=${desktopExecutable}"
 set "LOS_ALAMOS_DESKTOP_ARGUMENT=${process.env.LOS_ALAMOS_PROTOCOL_ROOT ? "" : process.cwd()}"
-where node >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-  node "%~dp0los.mjs" %*
-  exit /b %ERRORLEVEL%
+if not "%LOS_ALAMOS_FORCE_DESKTOP_RUNTIME%"=="1" (
+  where node >nul 2>nul
+  if not errorlevel 1 (
+    node "%~dp0los.mjs" %*
+    exit /b
+  )
 )
 set ELECTRON_RUN_AS_NODE=1
 "${desktopExecutable}" "%~dp0los.mjs" %*
