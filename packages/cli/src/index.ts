@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   cancelSessionProposal,
@@ -363,15 +363,15 @@ function parseSessionResult(value: string): SessionResult {
 }
 
 function print(value: unknown, args: ParsedArgs): void {
-  if (args.flags.json || typeof value !== "string") {
-    process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-    return;
-  }
-  process.stdout.write(`${value}\n`);
+  const content =
+    args.flags.json || typeof value !== "string"
+      ? `${JSON.stringify(value, null, 2)}\n`
+      : `${value}\n`;
+  writeOutput(content, process.stdout);
 }
 
 function printHelp(): void {
-  process.stdout.write(`Los Alamos CLI
+  writeOutput(`Los Alamos CLI
 
 Usage:
   ./.los/los agent context --json
@@ -400,13 +400,22 @@ Usage:
   ./.los/los open settings
   ./.los/los open about
   ./.los/los open session <session-id>
-`);
+`, process.stdout);
+}
+
+function writeOutput(content: string, stream: NodeJS.WriteStream): void {
+  const outputPath = process.env.LOS_ALAMOS_CLI_OUTPUT;
+  if (outputPath) {
+    writeFileSync(outputPath, content, { encoding: "utf8", flag: "a" });
+    return;
+  }
+  stream.write(content);
 }
 
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   if (process.argv.includes("--json")) {
-    process.stderr.write(
+    writeOutput(
       `${JSON.stringify(
         {
           ok: false,
@@ -418,10 +427,11 @@ main().catch((error: unknown) => {
         },
         null,
         2
-      )}\n`
+      )}\n`,
+      process.stderr
     );
   } else {
-    process.stderr.write(`${message}\n`);
+    writeOutput(`${message}\n`, process.stderr);
   }
   process.exitCode = 1;
 });

@@ -384,6 +384,9 @@ describe("workspace store", () => {
       'set "LOS_ALAMOS_DESKTOP_EXECUTABLE=C:\\Tools\\Los Alamos Portable.exe"'
     );
     expect(launcher).toContain('"C:\\Tools\\Los Alamos Portable.exe" "%~dp0los.mjs" %*');
+    expect(launcher).toContain('set "LOS_ALAMOS_CLI_OUTPUT=%TEMP%\\los-alamos-cli-');
+    expect(launcher).toContain('type "%LOS_ALAMOS_CLI_OUTPUT%"');
+    expect(launcher).toContain("exit /b %LOS_ALAMOS_CLI_EXIT%");
   });
 
   it("creates a persistent runtime fallback for Linux AppImages", async () => {

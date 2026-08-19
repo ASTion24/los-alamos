@@ -778,6 +778,17 @@ async function syncPublicProtocol(workspaceRoot: string): Promise<void> {
     const desktopArgument = process.env.LOS_ALAMOS_PROTOCOL_ROOT
       ? ""
       : process.cwd().replace(/'/g, "'\\''");
+    const windowsRuntimeInvocation = process.env.PORTABLE_EXECUTABLE_FILE
+      ? `set "LOS_ALAMOS_CLI_OUTPUT=%TEMP%\\los-alamos-cli-%RANDOM%-%RANDOM%.txt"
+set ELECTRON_RUN_AS_NODE=1
+"${desktopExecutable}" "%~dp0los.mjs" %*
+set "LOS_ALAMOS_CLI_EXIT=%ERRORLEVEL%"
+if exist "%LOS_ALAMOS_CLI_OUTPUT%" type "%LOS_ALAMOS_CLI_OUTPUT%"
+if exist "%LOS_ALAMOS_CLI_OUTPUT%" del /q "%LOS_ALAMOS_CLI_OUTPUT%"
+exit /b %LOS_ALAMOS_CLI_EXIT%`
+      : `set ELECTRON_RUN_AS_NODE=1
+"${desktopExecutable}" "%~dp0los.mjs" %*
+exit /b %ERRORLEVEL%`;
     const launcher = `#!/bin/sh
 set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -830,8 +841,7 @@ if not "%LOS_ALAMOS_FORCE_DESKTOP_RUNTIME%"=="1" (
     exit /b
   )
 )
-set ELECTRON_RUN_AS_NODE=1
-"${desktopExecutable}" "%~dp0los.mjs" %*
+${windowsRuntimeInvocation}
 `;
     const launcherPath = join(workspaceRoot, ".los", "los");
     await writeFile(launcherPath, launcher, "utf8");
