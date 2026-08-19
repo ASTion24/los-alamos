@@ -2,8 +2,8 @@ node_modules/
 .tools/
 out/
 dist/
-release/
-workspace/
+/release/
+/workspace/
 .vite/
 .vitest/
 coverage/
