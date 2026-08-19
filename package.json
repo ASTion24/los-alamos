@@ -4,6 +4,7 @@
   "private": true,
   "author": "xuanran.916",
   "description": "A quiet desktop workspace for closing long-tail projects through LLM-assisted context compacting.",
+  "desktopName": "los-alamos.desktop",
   "main": "out/main/index.js",
   "engines": {
     "node": ">=20.19.0"
@@ -19,10 +20,10 @@
     "pack:mac": "npm run build && electron-builder --mac dir",
     "pack:win": "npm run build && electron-builder --win dir",
     "pack:linux": "npm run build && electron-builder --linux dir",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
   "dependencies": {},
   "devDependencies": {
@@ -101,6 +102,7 @@
       "category": "Utility",
       "executableName": "los-alamos",
       "maintainer": "ASTion24 <ASTion24@users.noreply.github.com>",
+      "syncDesktopName": true,
       "synopsis": "Focused residency workspace for long-tail projects",
       "target": [
         "AppImage",
