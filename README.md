@@ -100,4 +100,8 @@ npm run dist:linux
 runner 上完成冷安装，并验证应用启动、preload/IPC、系统安全存储、Agent Runtime
 与 GUI 页面控制。产物统一写入 `release/`。
 
+macOS 正式发行使用 universal 构建、Developer ID 签名、Apple 公证和 stapled
+DMG。凭据准备、GitHub Secrets 与发行操作见
+[`docs/macos-signing.md`](docs/macos-signing.md)。
+
 源码仓库不会提交本地 `workspace/` 数据或 `release/` 构建产物。打包应用的正式数据默认位于系统“文稿/Documents”目录下的 `Los Alamos/`。

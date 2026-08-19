@@ -1,0 +1,188 @@
+name: macOS Signed Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.19.1
+          cache: npm
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Configure output paths
+        shell: bash
+        run: |
+          printf 'LOS_ALAMOS_SMOKE_OUTPUT=%s\n' \
+            "$RUNNER_TEMP/los-alamos-smoke" >>"$GITHUB_ENV"
+          printf 'LOS_ALAMOS_NOTARIZATION_OUTPUT=%s\n' \
+            "$RUNNER_TEMP/los-alamos-notarization" >>"$GITHUB_ENV"
+
+      - name: Validate release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for variable in \
+            MACOS_CERTIFICATE_P12_BASE64 \
+            CSC_KEY_PASSWORD \
+            APPLE_API_KEY_P8_BASE64 \
+            APPLE_API_KEY_ID \
+            APPLE_API_ISSUER; do
+            if [ -z "${!variable:-}" ]; then
+              missing+=("$variable")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf 'Missing required GitHub Secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            expected_tag="v$(node -p "require('./package.json').version")"
+            if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+              printf 'Tag %s does not match package version %s.\n' \
+                "$GITHUB_REF_NAME" "$expected_tag" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install --disable-pip-version-check -r requirements-smoke.txt
+
+      - name: Prepare signing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          certificate="$RUNNER_TEMP/los-alamos-developer-id.p12"
+          api_key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | /usr/bin/base64 -D >"$certificate"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | /usr/bin/base64 -D >"$api_key"
+          chmod 600 "$certificate" "$api_key"
+
+          test -s "$certificate"
+          grep -q '^-----BEGIN PRIVATE KEY-----$' "$api_key"
+
+          printf 'CSC_LINK=%s\n' "$certificate" >>"$GITHUB_ENV"
+          printf 'APPLE_API_KEY=%s\n' "$api_key" >>"$GITHUB_ENV"
+
+      - name: Test
+        run: npm test
+
+      - name: Build, sign, and notarize universal app
+        run: npm run dist:mac:signed
+
+      - name: Notarize and staple DMG
+        run: bash scripts/notarize_macos_dmg.sh release/macos-signed
+
+      - name: Verify signatures, tickets, and Gatekeeper
+        run: bash scripts/verify_macos_release.sh release/macos-signed
+
+      - name: Install DMG for smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="$(find release/macos-signed -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+
+          mount_point="$RUNNER_TEMP/los-alamos-release-dmg"
+          installed_app="$RUNNER_TEMP/Los Alamos.app"
+          mkdir -p "$mount_point"
+
+          cleanup_mount() {
+            hdiutil detach "$mount_point" >/dev/null 2>&1 || true
+          }
+          trap cleanup_mount EXIT
+
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_point"
+          source_app="$(find "$mount_point" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$source_app"
+          ditto "$source_app" "$installed_app"
+          hdiutil detach "$mount_point"
+          trap - EXIT
+
+          executable="$installed_app/Contents/MacOS/Los Alamos"
+          test -x "$executable"
+          printf 'LOS_ALAMOS_PACKAGED_EXECUTABLE=%s\n' "$executable" >>"$GITHUB_ENV"
+
+      - name: Run signed package smoke test
+        run: python scripts/packaged_smoke.py
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release/macos-signed
+          shasum -a 256 -- *.dmg *.zip >SHA256SUMS.txt
+
+      - name: Upload signed release evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: los-alamos-macos-signed-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            release/macos-signed/*.dmg
+            release/macos-signed/*.zip
+            release/macos-signed/SHA256SUMS.txt
+            ${{ runner.temp }}/los-alamos-notarization/*
+            ${{ runner.temp }}/los-alamos-smoke/*.png
+            ${{ runner.temp }}/los-alamos-smoke/*.log
+
+      - name: Publish tag release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=(
+            release/macos-signed/*.dmg
+            release/macos-signed/*.zip
+            release/macos-signed/SHA256SUMS.txt
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "${assets[@]}" \
+              --verify-tag \
+              --generate-notes \
+              --title "Los Alamos $GITHUB_REF_NAME"
+          fi
+
+      - name: Remove signing credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/los-alamos-developer-id.p12" \
+            "$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"

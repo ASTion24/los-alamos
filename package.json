@@ -22,6 +22,7 @@
     "pack:linux": "npm run build && electron-builder --linux dir",
     "dist": "npm run build && electron-builder --publish never",
     "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:mac:signed": "npm run build && electron-builder --mac --universal --publish never -c.mac.forceCodeSigning=true -c.directories.output=release/macos-signed",
     "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
@@ -74,10 +75,17 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true,
       "target": [
         "dmg",
         "zip"
       ]
+    },
+    "dmg": {
+      "sign": true
     },
     "win": {
       "icon": "build/icon.ico",
