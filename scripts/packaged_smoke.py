@@ -112,6 +112,7 @@ def verify_agent_runtime(executable: Path, workspace_root: Path) -> None:
         env=environment,
         capture_output=True,
         check=True,
+        encoding="utf8",
         text=True,
         timeout=30,
     )
@@ -278,9 +279,11 @@ def main() -> None:
                 [
                     "--disable-gpu",
                     "--disable-dev-shm-usage",
-                    "--password-store=basic",
                 ]
             )
+            password_store = os.environ.get("LOS_ALAMOS_SMOKE_PASSWORD_STORE")
+            if password_store:
+                command.append(f"--password-store={password_store}")
 
         with LOG.open("wb") as log:
             process = subprocess.Popen(

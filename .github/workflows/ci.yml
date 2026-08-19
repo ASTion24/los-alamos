@@ -71,7 +71,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes xvfb libsecret-1-0
+          sudo apt-get install --yes dbus-x11 gnome-keyring libsecret-1-0 xvfb
 
       - name: Build native packages
         run: npm run ${{ matrix.build-script }}
@@ -147,7 +147,7 @@ jobs:
 
       - name: Run packaged application smoke test on Linux
         if: matrix.platform == 'linux'
-        run: xvfb-run --auto-servernum python scripts/packaged_smoke.py
+        run: dbus-run-session -- sh scripts/linux_packaged_smoke.sh
 
       - name: Run Windows portable smoke test
         if: matrix.platform == 'windows'
@@ -161,7 +161,7 @@ jobs:
         run: |
           LOS_ALAMOS_PACKAGED_EXECUTABLE="$LOS_ALAMOS_PORTABLE_EXECUTABLE" \
           APPIMAGE_EXTRACT_AND_RUN=1 \
-          xvfb-run --auto-servernum python scripts/packaged_smoke.py
+          dbus-run-session -- sh scripts/linux_packaged_smoke.sh
 
       - name: Upload packages and smoke evidence
         if: always()
