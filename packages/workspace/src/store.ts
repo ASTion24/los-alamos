@@ -146,7 +146,23 @@ export interface WorkspaceHealth {
   issues: WorkspaceHealthIssue[];
 }
 
-export async function ensureWorkspace(workspaceRoot?: string): Promise<string> {
+const workspaceInitializations = new Map<string, Promise<string>>();
+
+export function ensureWorkspace(workspaceRoot?: string): Promise<string> {
+  const paths = getWorkspacePaths(workspaceRoot);
+  const current = workspaceInitializations.get(paths.root);
+  if (current) return current;
+
+  const initialization = ensureWorkspaceUnlocked(paths.root).finally(() => {
+    if (workspaceInitializations.get(paths.root) === initialization) {
+      workspaceInitializations.delete(paths.root);
+    }
+  });
+  workspaceInitializations.set(paths.root, initialization);
+  return initialization;
+}
+
+async function ensureWorkspaceUnlocked(workspaceRoot: string): Promise<string> {
   const paths = getWorkspacePaths(workspaceRoot);
   await mkdir(paths.projects, { recursive: true });
   await mkdir(paths.sessions, { recursive: true });

@@ -44,7 +44,7 @@
 
 ### 验证
 
-- 自动测试扩展至 8 个测试文件、79 项用例。
+- 自动测试扩展至 8 个测试文件、80 项用例。
 - 新增真实 Electron 的此刻工作台与连续驻留端到端验收。
 - CI 在 macOS、Windows 和 Linux 原生包上执行启动、IPC、Agent Runtime 与 GUI 回归。
 - 验收步骤和边界记录于 `docs/launcher-acceptance.md` 与

@@ -129,7 +129,7 @@ npm run build
 
 | 检查 | 结果 | 证据 |
 | --- | --- | --- |
-| 核心、工作区、CLI、模型适配测试 | 8 个文件，79 项全部通过 | `artifacts/launcher/unit-tests.log` |
+| 核心、工作区、CLI、模型适配测试 | 8 个文件，80 项全部通过 | `artifacts/launcher/unit-tests.log` |
 | TypeScript 与生产构建 | 通过 | `npm run build` |
 | 最新打包版新主路径 | 1180×760、980×640 均通过；含长文本横向溢出检查 | `artifacts/launcher/packaged-smoke.log` |
 | 最新打包版旧流程回归 | 两种尺寸均通过；含任务图、暂停恢复、交接、收尾及计划生命周期 | `artifacts/launcher/continuity-regression.log` |

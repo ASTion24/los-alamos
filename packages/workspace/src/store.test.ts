@@ -6,6 +6,7 @@ import {
   cancelSessionProposal,
   closeWorkspaceSession,
   createProject as createStoredProject,
+  ensureWorkspace,
   type CreateProjectInput,
   inspectWorkspace,
   proposeSession,
@@ -37,6 +38,16 @@ async function workspace(): Promise<string> {
 }
 
 describe("workspace store", () => {
+  it("coalesces concurrent workspace initialization", async () => {
+    const root = await workspace();
+    const first = ensureWorkspace(root);
+    const second = ensureWorkspace(root);
+
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+    expect(await readFile(join(root, "README.md"), "utf8")).toContain("# Los Alamos");
+  });
+
   it("rejects empty project input", async () => {
     const root = await workspace();
 

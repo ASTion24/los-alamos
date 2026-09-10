@@ -1,11 +1,13 @@
 """Exercise real Electron IPC and persistence in a disposable workspace."""
 import json
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
 import time
 import sys
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from urllib.request import urlopen
@@ -17,6 +19,22 @@ OUT = ROOT / "artifacts" / "continuity"
 OUT.mkdir(parents=True, exist_ok=True)
 electron_name = "Electron.app/Contents/MacOS/Electron" if sys.platform == "darwin" else "electron.exe" if sys.platform == "win32" else "electron"
 ELECTRON = Path(os.environ.get("LOS_ALAMOS_PACKAGED_EXECUTABLE", ROOT / "node_modules/electron/dist" / electron_name))
+
+
+@contextmanager
+def temporary_directory(prefix):
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    try:
+        yield str(path)
+    finally:
+        for attempt in range(10):
+            try:
+                shutil.rmtree(path)
+                break
+            except PermissionError:
+                if sys.platform != "win32":
+                    raise
+                time.sleep(0.25 * (attempt + 1))
 
 
 def free_port():
@@ -39,7 +57,7 @@ def check_layout(page):
 
 
 def run(width, height):
-    with tempfile.TemporaryDirectory(prefix="los-acceptance-") as temp:
+    with temporary_directory(prefix="los-acceptance-") as temp:
         workspace = Path(temp) / "data"
         env = os.environ.copy()
         env.pop("ELECTRON_RUN_AS_NODE", None)
