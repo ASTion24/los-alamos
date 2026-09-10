@@ -849,10 +849,23 @@ async function writeTextAtomic(
         // Preserve the previous valid backup when the primary file is already damaged.
       }
     }
-    await rename(temporaryPath, path);
+    await renameWithTransientRetry(temporaryPath, path);
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);
     throw error;
+  }
+}
+
+async function renameWithTransientRetry(source: string, target: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(source, target);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!["EBUSY", "EPERM"].includes(code ?? "") || attempt >= 7) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
+    }
   }
 }
 
