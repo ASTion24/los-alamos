@@ -14,6 +14,10 @@ from urllib.request import urlopen
 
 from playwright.sync_api import sync_playwright
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf8")
+    sys.stderr.reconfigure(encoding="utf8")
+
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "artifacts" / "continuity"
 OUT.mkdir(parents=True, exist_ok=True)

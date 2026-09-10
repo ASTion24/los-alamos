@@ -10,6 +10,10 @@ from urllib.request import urlopen
 from playwright.sync_api import sync_playwright
 from continuity_smoke import ROOT, ELECTRON, free_port, check_layout
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf8")
+    sys.stderr.reconfigure(encoding="utf8")
+
 OUT = ROOT / "artifacts" / "launcher"
 OUT.mkdir(parents=True, exist_ok=True)
 
