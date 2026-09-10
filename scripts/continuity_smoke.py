@@ -226,11 +226,11 @@ def run(width, height):
                     page.get_by_label("关闭设置").click()
                     assert not errors, errors
                     models = list((workspace / "projects").glob("*/model.json"))
-                    model = next(value for value in (json.loads(path.read_text()) for path in models) if value["title"] == "论文收尾")
+                    model = next(value for value in (json.loads(path.read_text(encoding="utf8")) for path in models) if value["title"] == "论文收尾")
                     assert model["capsule"]["nextAction"] == "从第21条继续"
                     assert model["completionPercent"] == 0
                     assert model.get("resolution") is None
-                    record = json.loads(next((workspace / "sessions").glob("*.json")).read_text())
+                    record = json.loads(next((workspace / "sessions").glob("*.json")).read_text(encoding="utf8"))
                     assert record["status"] == "closed"
                     assert record["handoff"]["summary"] == "核对到第20条"
                     browser.close()

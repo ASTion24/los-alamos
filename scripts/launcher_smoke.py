@@ -80,12 +80,12 @@ def run(width, height):
                         page.get_by_role("button", name="暂停", exact=True).wait_for()
                         files = list((workspace / "sessions").glob("*.json"))
                         assert len(files) == 1
-                        assert json.loads(files[0].read_text())["status"] == "active"
+                        assert json.loads(files[0].read_text(encoding="utf8"))["status"] == "active"
                         page.locator(".session-capture summary").click()
                         page.get_by_label("此刻挂念的事").fill("记得续签域名，今天先不展开。")
                         page.get_by_role("button", name="先收下来", exact=True).click()
                         page.get_by_text("已收好，继续眼前这一件。", exact=True).wait_for()
-                        assert json.loads(files[0].read_text())["status"] == "active"
+                        assert json.loads(files[0].read_text(encoding="utf8"))["status"] == "active"
                         page.locator(".session-capture summary").click()
                         page.get_by_label("本次推进记录").fill("核对到第12条引用")
                         page.reload()
@@ -108,7 +108,7 @@ def run(width, height):
                         page.locator(".launcher").wait_for()
                         page.locator(".entry-title").get_by_text("从第13条引用继续", exact=True).wait_for()
                         model_path = next((workspace / "projects").glob("*/model.json"))
-                        assert json.loads(model_path.read_text())["completionPercent"] == 0
+                        assert json.loads(model_path.read_text(encoding="utf8"))["completionPercent"] == 0
                         assert len(list((workspace / "sessions").glob("*.json"))) == 1
                         page.screenshot(path=OUT / f"return-{width}.png")
                         page.get_by_role("button", name="确认开始 25 分钟", exact=True).click()
@@ -138,8 +138,8 @@ def run(width, height):
                         inbox.wait_for(state="detached")
                         check_layout(page)
                         assert not errors, errors
-                        assert json.loads(model_path.read_text())["resolution"]["outcome"] == "closed"
-                        raw_captures = [json.loads(path.read_text()) for path in (workspace / "inbox").glob("*.json")]
+                        assert json.loads(model_path.read_text(encoding="utf8"))["resolution"]["outcome"] == "closed"
+                        raw_captures = [json.loads(path.read_text(encoding="utf8")) for path in (workspace / "inbox").glob("*.json")]
                         assert any(capture["text"] == raw and capture["status"] == "converted" for capture in raw_captures)
                         assert any(capture.get("sourceSessionId") for capture in raw_captures)
                         page.get_by_label("此刻挂念的事").fill("布局验收：保留很长的真实动作而不遮挡按钮。")
