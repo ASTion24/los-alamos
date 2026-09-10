@@ -21,7 +21,10 @@
         "needs_constraints",
         "ready_to_propose",
         "review_proposal",
-        "residency_active"
+        "residency_active",
+        "residency_paused",
+        "plan_attention",
+        "no_eligible_task"
       ]
     },
     "summary": { "type": "string" },
@@ -31,6 +34,8 @@
       "properties": {
         "root": { "type": "string" },
         "ok": { "type": "boolean" },
+        "plan": { "$ref": "plan.schema.json" },
+        "inboxCount": { "type": "integer", "minimum": 0 },
         "issues": {
           "type": "array",
           "items": {
@@ -79,7 +84,8 @@
         },
         "intensity": {
           "enum": ["low", "medium", "high", "xhigh"]
-        }
+        },
+        "projectId": { "type": "string" }
       }
     },
     "nextActions": {

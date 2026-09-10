@@ -21,15 +21,16 @@ export function computeCompletionPercent(tasks: WorkUnit[]): number {
 }
 
 export function computeConfidence(project: Pick<LongTailProject, "closeCriteria" | "unknowns" | "taskGraph">): Confidence {
-  const taskCount = project.taskGraph.tasks.length;
+  const tasks = project.taskGraph.tasks;
   const hasCloseCriteria = project.closeCriteria.some((item) => item.trim().length > 0);
   const unknownCount = project.unknowns.filter((item) => item.trim().length > 0).length;
 
-  if (!hasCloseCriteria || taskCount < 3 || unknownCount >= 3) {
+  if (!hasCloseCriteria || tasks.length === 0 || unknownCount >= 3 ||
+    tasks.some((task) => !task.startAction.trim() || !task.completionCriteria.trim() || !task.notDoing.trim())) {
     return "low";
   }
 
-  if (unknownCount > 0 || taskCount < 5) {
+  if (unknownCount > 0 || tasks.some((task) => task.status === "unknown")) {
     return "medium";
   }
 

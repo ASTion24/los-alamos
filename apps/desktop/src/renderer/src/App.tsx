@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import {
-  Archive,
-  ArchiveRestore,
   ArrowLeft,
   Book,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
-  FilePenLine,
+  CalendarDays,
   FolderOpen,
   History,
   Info,
@@ -17,22 +15,28 @@ import {
   RotateCcw,
   Settings,
   Timer,
-  X
+  LayoutGrid, House
 } from "lucide-react";
 import { AboutPanel } from "./AboutPanel";
 import { SettingsPanel } from "./SettingsPanel";
-import { TaskEditor, TaskMap, WeightedProgress } from "./TaskMap";
+import { Dialog, SessionContinuity, useSessionSeconds, ProposalEditor } from "./Continuity";
+import { ProjectWorkspace, IntakeFields, outcomeLabels } from "./ProjectWorkspace";
+import { PlansView } from "./PlansView";
+import { Launcher } from "./Launcher";
+import { localDate, projectIsAvailable, sessionElapsedSeconds } from "../../../../../packages/core/src";
 import type {
   Intensity,
   LongTailProject,
   ResidencySession,
   SessionResult,
-  WorkUnit,
-  WorkspaceHealth
+  WorkspaceHealth,
+  ContextCapsule, ProjectIntake, ResidencyPlan, AttentionCapture
 } from "./types";
 import "./styles.css";
+import "./continuity.css";
+import "./launcher.css";
 
-type View = "work" | "projects" | "history";
+type View = "home" | "work" | "projects" | "history" | "plans";
 
 type ProjectSurfaceRequest = {
   id: number;
@@ -70,10 +74,10 @@ const intensityCopy: Record<Intensity, { label: string; summary: string; detail:
 };
 
 const intensityThemeStops = [
-  { background: [171, 190, 181], soft: [232, 239, 233], accent: [62, 91, 75] },
-  { background: [194, 177, 132], soft: [242, 235, 218], accent: [112, 87, 47] },
-  { background: [179, 119, 103], soft: [241, 222, 214], accent: [128, 65, 53] },
-  { background: [93, 68, 87], soft: [229, 216, 226], accent: [58, 35, 53] }
+  { background: [219, 232, 224], soft: [244, 249, 246], accent: [57, 98, 79] },
+  { background: [219, 233, 234], soft: [244, 249, 249], accent: [54, 98, 103] },
+  { background: [236, 219, 214], soft: [249, 242, 238], accent: [136, 78, 67] },
+  { background: [222, 214, 225], soft: [246, 241, 246], accent: [98, 66, 97] }
 ] as const;
 
 const sessionResultCopy: Record<SessionResult, string> = {
@@ -88,9 +92,13 @@ const scopeCopy = {
 } as const;
 
 export function App(): JSX.Element {
-  const [view, setView] = useState<View>("projects");
+  const [view, setView] = useState<View>("home");
+  const [captures, setCaptures] = useState<AttentionCapture[]>([]);
+  const [launcherProjectId, setLauncherProjectId] = useState<string | undefined>();
   const [projects, setProjects] = useState<LongTailProject[]>([]);
   const [sessions, setSessions] = useState<ResidencySession[]>([]);
+  const [plans, setPlans] = useState<ResidencyPlan[]>([]);
+  const [sessionProjectId, setSessionProjectId] = useState<string | undefined>();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [brief, setBrief] = useState("");
@@ -123,10 +131,12 @@ export function App(): JSX.Element {
   }, []);
 
   const reload = useCallback(async (): Promise<void> => {
-    const [nextProjects, nextSessions, nextHealth] = await Promise.all([
+    const [nextProjects, nextSessions, nextHealth, nextPlans, nextCaptures] = await Promise.all([
       window.los.listProjects(),
       window.los.listSessions(),
-      window.los.getWorkspaceHealth()
+      window.los.getWorkspaceHealth(),
+      window.los.listPlans(),
+      window.los.listCaptures()
     ]);
 
     const normalizedSessions = nextSessions.map((session) => ({
@@ -139,17 +149,21 @@ export function App(): JSX.Element {
 
     setProjects(nextProjects);
     setSessions(normalizedSessions);
+    setPlans(nextPlans);
+    setCaptures(nextCaptures);
     setWorkspaceHealth(nextHealth);
     setSelectedProjectId((current) => {
       if (current && nextProjects.some((project) => project.id === current)) return current;
       return nextProjects[0]?.id ?? null;
     });
     setActiveSession((current) => {
+      const pending = normalizedSessions.find((session) => ["active", "paused", "proposed"].includes(session.status));
+      if (pending) return pending;
       if (current) {
         return normalizedSessions.find((session) => session.id === current.id) ?? current;
       }
       return (
-        normalizedSessions.find((session) => session.status === "active") ??
+        normalizedSessions.find((session) => ["active", "paused"].includes(session.status)) ??
         normalizedSessions.find((session) => session.status === "proposed") ??
         null
       );
@@ -185,7 +199,10 @@ export function App(): JSX.Element {
       .catch((error: unknown) => {
         pushNotice(error instanceof Error ? error.message : String(error));
       });
-    void reload();
+    void reload().catch((error) => pushNotice(String(error)));
+    void window.los.listSessions().then((list) => {
+      if (list.some((session) => ["active", "paused", "proposed"].includes(session.status))) navigate("work");
+    }).catch((error) => pushNotice(String(error)));
     const unsubscribeOpen = window.los.onOpenRequest((request) => {
       const payload = extractPayload(request);
       if (payload?.target === "session") {
@@ -202,6 +219,10 @@ export function App(): JSX.Element {
         navigate("work");
       } else if (payload?.target === "history") {
         navigate("history");
+      } else if (payload?.target === "plans") {
+        navigate("plans");
+      } else if (payload?.target === "home") {
+        navigate("home");
       } else if (payload?.target === "settings") {
         setSettingsOpen(true);
       } else if (payload?.target === "about") {
@@ -221,10 +242,10 @@ export function App(): JSX.Element {
           surface: "overview"
         });
       }
-      void reload();
+      void reload().catch((error) => pushNotice(String(error)));
     });
     const unsubscribeWorkspace = window.los.onWorkspaceChanged(() => {
-      void reload();
+      void reload().catch((error) => pushNotice(String(error)));
     });
     const unsubscribeWarning = window.los.onOperationWarning(pushNotice);
     const unsubscribeDeadline = window.los.onSessionDeadline((sessionId) => {
@@ -261,7 +282,7 @@ export function App(): JSX.Element {
         setSettingsOpen(false);
         return;
       }
-      if (!(event.metaKey || event.ctrlKey) || settingsOpen || activeSession?.status === "active") {
+      if (!(event.metaKey || event.ctrlKey) || settingsOpen || document.querySelector(".continuity-dialog") || activeSession?.status === "active") {
         return;
       }
       const nextView =
@@ -276,11 +297,11 @@ export function App(): JSX.Element {
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [aboutOpen, activeSession?.status, closeAbout, navigate, settingsOpen]);
 
-  async function handleCreateProject(): Promise<void> {
+  async function handleCreateProject(intake?: ProjectIntake): Promise<void> {
     if (!title.trim() || !brief.trim()) return;
     setBusy(true);
     try {
-      const project = await window.los.createProject({ title, brief });
+      const project = await window.los.createProject({ title, brief, intake });
       setTitle("");
       setBrief("");
       await reload();
@@ -288,6 +309,7 @@ export function App(): JSX.Element {
       pushNotice("项目已加入总览。");
     } catch (error) {
       pushNotice(error instanceof Error ? error.message : String(error));
+      throw error;
     } finally {
       setBusy(false);
     }
@@ -297,12 +319,12 @@ export function App(): JSX.Element {
     setBusy(true);
     setNotice(null);
     try {
-      const session = await window.los.proposeSession({ minutes, intensity });
+      const session = await window.los.proposeSession({ minutes, intensity, projectId: sessionProjectId });
       setActiveSession(session);
       if (session) {
         navigate("work");
       } else {
-        pushNotice("当前强度下，没有适合的未阻塞任务。");
+        pushNotice("当前没有符合边界的任务。请查看依赖、调整任务范围，或确认项目收尾决定。");
       }
       await reload();
     } catch (error) {
@@ -312,14 +334,15 @@ export function App(): JSX.Element {
     }
   }
 
-  async function handleClose(result: SessionResult): Promise<void> {
+  async function handleClose(result: SessionResult, handoff?: ContextCapsule): Promise<void> {
     if (!activeSession) return;
     setBusy(true);
     try {
       const closed = await window.los.closeSession({
         sessionId: activeSession.id,
         result,
-        note: closeNote.trim() || undefined
+        note: closeNote.trim() || undefined,
+        handoff
       });
       setActiveSession(closed);
       setCloseNote("");
@@ -327,6 +350,7 @@ export function App(): JSX.Element {
       pushNotice("本次驻留已写入记录。");
     } catch (error) {
       pushNotice(error instanceof Error ? error.message : String(error));
+      throw error;
     } finally {
       setBusy(false);
     }
@@ -360,87 +384,6 @@ export function App(): JSX.Element {
     }
   }
 
-  async function handleUpdateTask(
-    projectId: string,
-    taskId: string,
-    patch: Partial<WorkUnit>
-  ): Promise<void> {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const updatedProject = await window.los.updateTask({ projectId, taskId, patch });
-      setProjects((current) =>
-        current.map((project) => (project.id === updatedProject.id ? updatedProject : project))
-      );
-      pushNotice("任务已更新。");
-    } catch (error) {
-      pushNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleReanalyzeProject(projectId: string): Promise<void> {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const updatedProject = await window.los.reanalyzeProject(projectId);
-      setProjects((current) =>
-        current.map((project) => (project.id === updatedProject.id ? updatedProject : project))
-      );
-      pushNotice(`任务图已重建，共 ${updatedProject.taskGraph.tasks.length} 个任务。`);
-    } catch (error) {
-      pushNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleUpdateProjectBrief(projectId: string, nextBrief: string): Promise<void> {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const savedProject = await window.los.updateProjectBrief({
-        projectId,
-        brief: nextBrief
-      });
-      setProjects((current) =>
-        current.map((project) => (project.id === savedProject.id ? savedProject : project))
-      );
-      try {
-        const rebuiltProject = await window.los.reanalyzeProject(projectId);
-        setProjects((current) =>
-          current.map((project) => (project.id === rebuiltProject.id ? rebuiltProject : project))
-        );
-        pushNotice("项目事实与任务图已更新。");
-      } catch (error) {
-        pushNotice(
-          `项目事实已保存，任务图重建失败：${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    } catch (error) {
-      pushNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleSetProjectArchived(projectId: string, archived: boolean): Promise<void> {
-    setBusy(true);
-    try {
-      const updatedProject = await window.los.setProjectArchived({ projectId, archived });
-      setProjects((current) =>
-        current.map((project) => (project.id === updatedProject.id ? updatedProject : project))
-      );
-      setProjectDetailOpen(false);
-      pushNotice(archived ? "项目已归档。" : "项目已恢复。");
-    } catch (error) {
-      pushNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const sessionRunning = activeSession?.status === "active";
   const residencyOpen = view === "work";
 
@@ -452,20 +395,16 @@ export function App(): JSX.Element {
     >
       {!residencyOpen ? (
         <header className="topline">
-          <button className="wordmark" onClick={() => navigate("projects")}>
+          <button className="wordmark" onClick={() => { setLauncherProjectId(undefined); navigate("home"); }}>
             Los Alamos
           </button>
           <div className="titlebar-drag" />
           <div className="app-commands">
-            {view === "history" ? (
-              <button className="command-button" onClick={() => navigate("projects")}>
-                <ArrowLeft size={15} />
-                项目
-              </button>
-            ) : null}
-            <button className="command-button primary" onClick={() => navigate("work")}>
+            <button className={`command-button ${view === "home" ? "active" : ""}`} onClick={() => { setLauncherProjectId(undefined); navigate("home"); }}><House size={16} />此刻</button>
+            <button className={`command-button ${view === "projects" ? "active" : ""}`} onClick={() => navigate("projects")}><LayoutGrid size={16} />项目</button>
+            <button className="command-button" onClick={() => navigate("plans")}><CalendarDays size={16} />计划</button>
+            <button className="icon-button" title="自定驻留" aria-label="自定驻留" onClick={() => { setSessionProjectId(undefined); setActiveSession((current) => current?.status === "closed" ? null : current); navigate("work"); }}>
               <Timer size={16} />
-              驻留
             </button>
             {view !== "history" ? (
               <button className="command-button" onClick={() => navigate("history")}>
@@ -511,8 +450,12 @@ export function App(): JSX.Element {
         </header>
       ) : null}
 
-      <section className={`stage ${residencyOpen ? "residency-stage" : ""}`}>
-        {notice ? <div className="notice-line">{notice.message}</div> : null}
+      <section className={`stage ${residencyOpen ? "residency-stage" : ""} ${view === "home" ? "launcher-stage" : ""}`}>
+        {notice ? <div className="notice-line" role="status" title={notice.message}>{notice.message}</div> : null}
+        {view === "home" && <Launcher projects={projects} sessions={sessions} plans={plans} captures={captures}
+          initialProjectId={launcherProjectId} onRefresh={reload}
+          onStart={(session) => { setActiveSession(session); setCloseNote(""); navigate("work"); }}
+          onOpenProject={openProject} onLibrary={() => navigate("projects")} onPlans={() => navigate("plans")} />}
         {view === "projects" ? (
           <ProjectsView
             projects={projects}
@@ -529,17 +472,16 @@ export function App(): JSX.Element {
             onTitleChange={setTitle}
             onBriefChange={setBrief}
             onCreateProject={handleCreateProject}
-            onUpdateTask={handleUpdateTask}
-            onReanalyzeProject={handleReanalyzeProject}
-            onUpdateProjectBrief={handleUpdateProjectBrief}
-            onSetProjectArchived={handleSetProjectArchived}
-            onOpenSession={() => navigate("work")}
+            onOpenSession={() => { setSessionProjectId(selectedProject?.id); navigate("work"); }}
+            onRefresh={reload}
           />
         ) : null}
 
         {view === "work" ? (
           <ResidencyView
-            projects={projects.filter((project) => !project.archivedAt)}
+            projects={projects}
+            targetProject={projects.find((project) => project.id === sessionProjectId)?.title}
+            plan={plans.find((plan) => plan.status === "active")}
             minutes={minutes}
             intensity={intensity}
             activeSession={activeSession}
@@ -551,13 +493,17 @@ export function App(): JSX.Element {
             onStart={handleStartSession}
             onCancelProposal={handleCancelProposal}
             onClose={handleClose}
+            onSession={setActiveSession}
             onCloseNoteChange={setCloseNote}
-            onExit={() => navigate("projects")}
-            onNewSession={() => setActiveSession(null)}
+            onExit={() => navigate("home")}
+            onNewSession={() => { setLauncherProjectId(activeSession?.projectId); setActiveSession(null); navigate("home"); }}
+            onRefresh={reload}
           />
         ) : null}
 
         {view === "history" ? <HistoryView sessions={sessions} onOpenProject={openProject} /> : null}
+        {view === "plans" ? <PlansView projects={projects} plans={plans} sessions={sessions} onRefresh={reload}
+          onWork={() => { setSessionProjectId(undefined); navigate("work"); }} /> : null}
       </section>
 
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} onNotice={pushNotice} />
@@ -572,6 +518,8 @@ export function App(): JSX.Element {
 
 function ResidencyView(props: {
   projects: LongTailProject[];
+  targetProject?: string;
+  plan?: ResidencyPlan;
   minutes: number;
   intensity: Intensity;
   activeSession: ResidencySession | null;
@@ -582,10 +530,12 @@ function ResidencyView(props: {
   onPropose: () => void;
   onStart: () => void;
   onCancelProposal: () => void;
-  onClose: (result: SessionResult) => void;
+  onClose: (result: SessionResult, handoff?: ContextCapsule) => Promise<void>;
+  onSession: (session: ResidencySession) => void;
   onCloseNoteChange: (value: string) => void;
   onExit: () => void;
   onNewSession: () => void;
+  onRefresh: () => Promise<void>;
 }): JSX.Element {
   const [intensityPosition, setIntensityPosition] = useState(() => intensities.indexOf(props.intensity));
 
@@ -593,27 +543,9 @@ function ResidencyView(props: {
     setIntensityPosition(intensities.indexOf(props.intensity));
   }, [props.intensity]);
 
-  const activeStartedAt =
-    props.activeSession?.status === "active" ? props.activeSession.startedAt : null;
-  const [skyNow, setSkyNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!activeStartedAt) return;
-    const timer = window.setInterval(() => setSkyNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [activeStartedAt]);
-
-  const skyElapsedSeconds = activeStartedAt
-    ? Math.max(0, Math.floor((skyNow - new Date(activeStartedAt).getTime()) / 1000))
-    : 0;
-  const themePosition =
-    props.activeSession?.status === "proposed"
-      ? intensities.indexOf(props.activeSession.intensity)
-      : intensityPosition;
-  const theme =
-    props.activeSession?.status === "active"
-      ? sessionSkyTheme(skyElapsedSeconds)
-      : residencyTheme(themePosition);
+  const themePosition = props.activeSession
+    ? intensities.indexOf(props.activeSession.intensity) : intensityPosition;
+  const theme = residencyTheme(themePosition);
   const previewIntensity = intensities[Math.round(intensityPosition)] ?? props.intensity;
   const displayedIntensity =
     props.activeSession?.status === "proposed"
@@ -640,25 +572,30 @@ function ResidencyView(props: {
         {props.activeSession?.status !== "active" ? (
           <button className="residency-exit" onClick={props.onExit}>
             <ArrowLeft size={16} />
-            返回项目
+              返回此刻
           </button>
         ) : null}
       </header>
 
       <div className="residency-body">
-        {props.activeSession?.status === "active" ? (
+        {props.activeSession && ["active", "paused", "closed"].includes(props.activeSession.status) ? (
           <div className="active-residency-canvas">
             <section className="time-slab">
               <SessionClock session={props.activeSession} />
             </section>
             <section className="focus-slab">
-              <SessionSurface
+              <SessionContinuity
+                key={props.activeSession.id}
                 session={props.activeSession}
-                closeNote={props.closeNote}
+                note={props.closeNote}
                 busy={props.busy}
                 onClose={props.onClose}
-                onCloseNoteChange={props.onCloseNoteChange}
-                onNewSession={props.onNewSession}
+                onNote={props.onCloseNoteChange}
+                onNext={props.onNewSession}
+                onExit={props.onExit}
+                onSession={props.onSession}
+                project={props.projects.find((project) => project.id === props.activeSession?.projectId)}
+                onRefresh={props.onRefresh}
               />
             </section>
           </div>
@@ -668,12 +605,14 @@ function ResidencyView(props: {
             busy={props.busy}
             onStart={props.onStart}
             onCancel={props.onCancelProposal}
+            onSession={props.onSession}
           />
         ) : (
           <section className="residency-control">
             <div className="residency-console">
               <div className="prep-head">
                 <strong>给出本轮约束</strong>
+                {(props.targetProject || props.plan) && <span className="scope-label">{props.targetProject ?? props.plan?.title}</span>}
               </div>
 
               <div className="residency-instruments">
@@ -702,7 +641,7 @@ function ResidencyView(props: {
               <div className="residency-submit">
                 <button
                   className="begin-block"
-                  disabled={props.busy || props.projects.length === 0}
+                  disabled={props.busy || !props.projects.some(projectIsAvailable)}
                   onClick={props.onPropose}
                 >
                   <strong>生成驻留提案</strong>
@@ -721,6 +660,7 @@ function ResidencyProposal(props: {
   busy: boolean;
   onStart: () => void;
   onCancel: () => void;
+  onSession: (session: ResidencySession) => void;
 }): JSX.Element {
   return (
     <section className="residency-proposal">
@@ -734,6 +674,7 @@ function ResidencyProposal(props: {
           <span>选择依据</span>
           <p>{props.session.selectionReason}</p>
         </div>
+        {props.session.capsule?.summary && <div className="proposal-reentry"><span>上次停在</span><p>{props.session.capsule.summary}</p></div>}
 
         <div className="proposal-contract">
           <article>
@@ -757,6 +698,7 @@ function ResidencyProposal(props: {
             <span>{scopeCopy[props.session.scope]}</span>
           </div>
           <div className="proposal-actions">
+            <ProposalEditor session={props.session} onSaved={props.onSession} />
             <button disabled={props.busy} onClick={props.onCancel}>
               <RotateCcw size={15} />
               调整约束
@@ -915,7 +857,7 @@ function IntensitySlider(props: {
 }
 
 function SessionClock({ session }: { session: ResidencySession }): JSX.Element {
-  const elapsedSeconds = useElapsedSeconds(session.startedAt, session.endedAt);
+  const elapsedSeconds = useSessionSeconds(session);
 
   return (
     <div className="session-clock">
@@ -989,67 +931,6 @@ function LoadStack(props: { position: number; label: string }): JSX.Element {
   );
 }
 
-function SessionSurface(props: {
-  session: ResidencySession;
-  closeNote: string;
-  busy: boolean;
-  onClose: (result: SessionResult) => void;
-  onCloseNoteChange: (value: string) => void;
-  onNewSession: () => void;
-}): JSX.Element {
-  const elapsedSeconds = useElapsedSeconds(props.session.startedAt, props.session.endedAt);
-  const plannedSeconds = Math.max(1, props.session.minutesPlanned * 60);
-  const elapsedPercent = Math.min(100, Math.round((elapsedSeconds / plannedSeconds) * 100));
-
-  return (
-    <div className="session-surface">
-      <div className="session-time-track">
-        <span style={{ width: `${elapsedPercent}%` }} />
-      </div>
-      <div className="session-title">
-        <p className="project-name">{props.session.projectTitle}</p>
-        <h2>{props.session.taskTitle}</h2>
-      </div>
-      <Block label="开始动作" text={props.session.startAction} />
-      <Block label="完成标准" text={props.session.completionCriteria} />
-      <Block label="明确不做" text={props.session.notDoing} />
-
-      {props.session.status !== "closed" ? (
-        <div className="finish-strip">
-          <textarea
-            value={props.closeNote}
-            onChange={(event) => props.onCloseNoteChange(event.target.value)}
-            placeholder="补充一两句这次推进情况（可选）"
-          />
-          <div className="finish-actions">
-            <button onClick={() => props.onClose("not_completed")} disabled={props.busy}>
-              未完成
-            </button>
-            <button onClick={() => props.onClose("partial")} disabled={props.busy}>
-              部分完成
-            </button>
-            <button onClick={() => props.onClose("completed")} disabled={props.busy}>
-              已完成
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="session-complete">
-          <div className="session-result">
-            <span>结果</span>
-            <strong>{props.session.userResult ? sessionResultCopy[props.session.userResult] : "已记录"}</strong>
-          </div>
-          <p className="session-log">{props.session.log ?? props.session.prompt}</p>
-          <button className="new-session-button" onClick={props.onNewSession}>
-            <RotateCcw size={15} />
-            再开始一段
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ProjectsView(props: {
   projects: LongTailProject[];
   sessions: ResidencySession[];
@@ -1064,11 +945,8 @@ function ProjectsView(props: {
   onBackToOverview: () => void;
   onTitleChange: (value: string) => void;
   onBriefChange: (value: string) => void;
-  onCreateProject: () => Promise<void>;
-  onUpdateTask: (projectId: string, taskId: string, patch: Partial<WorkUnit>) => Promise<void>;
-  onReanalyzeProject: (projectId: string) => Promise<void>;
-  onUpdateProjectBrief: (projectId: string, brief: string) => Promise<void>;
-  onSetProjectArchived: (projectId: string, archived: boolean) => Promise<void>;
+  onCreateProject: (intake?: ProjectIntake) => Promise<void>;
+  onRefresh: () => Promise<void>;
   onOpenSession: () => void;
 }): JSX.Element {
   const viewport = useViewport();
@@ -1076,8 +954,10 @@ function ProjectsView(props: {
   const [page, setPage] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const activeProjects = props.projects.filter((project) => !project.archivedAt);
-  const archivedProjects = props.projects.filter((project) => Boolean(project.archivedAt));
+  const [intake, setIntake] = useState<ProjectIntake>({ completed: "", remaining: "", closeCriteria: "" });
+  const [createError, setCreateError] = useState("");
+  const activeProjects = props.projects.filter(projectIsAvailable);
+  const archivedProjects = props.projects.filter((project) => !projectIsAvailable(project));
   const listedProjects = showArchived ? archivedProjects : activeProjects;
   const totalPages = Math.max(1, Math.ceil(listedProjects.length / pageSize));
 
@@ -1130,18 +1010,10 @@ function ProjectsView(props: {
     return (
       <div className="project-focus-plane" key={props.selectedProject.id}>
         <section className="inspect-slab">
-          <ProjectDetail
+          <ProjectWorkspace
             project={props.selectedProject}
-            busy={props.busy}
             onBack={props.onBackToOverview}
-            onUpdateTask={(taskId, patch) => props.onUpdateTask(props.selectedProject?.id ?? "", taskId, patch)}
-            onReanalyze={() => props.onReanalyzeProject(props.selectedProject?.id ?? "")}
-            onUpdateBrief={(brief) =>
-              props.onUpdateProjectBrief(props.selectedProject?.id ?? "", brief)
-            }
-            onSetArchived={(archived) =>
-              props.onSetProjectArchived(props.selectedProject?.id ?? "", archived)
-            }
+            onRefresh={props.onRefresh}
             onOpenSession={props.onOpenSession}
             sessions={props.sessions.filter(
               (session) => session.projectId === props.selectedProject?.id
@@ -1176,7 +1048,7 @@ function ProjectsView(props: {
                   setPage(0);
                 }}
               >
-                {showArchived ? "返回项目" : `归档 ${archivedProjects.length}`}
+                {showArchived ? "返回项目" : `已收起 ${archivedProjects.length}`}
               </button>
             </div>
             {listedProjects.length > pageSize ? (
@@ -1186,7 +1058,7 @@ function ProjectsView(props: {
         ) : null}
         {listedProjects.length === 0 ? (
           <EmptyState
-            label={showArchived ? "没有归档项目" : "总览还是空的"}
+            label={showArchived ? "没有收起的项目" : "总览还是空的"}
             detail={showArchived ? "归档后的项目会集中在这里。" : "先加入一个项目，系统再帮你做拆分与驻留。"}
           />
         ) : (
@@ -1203,6 +1075,9 @@ function ProjectsView(props: {
                 >
                   <div className="project-note-title">
                     <h3>{project.title}</h3>
+                    <span className="project-note-state">{project.resolution ? outcomeLabels[project.resolution.outcome] : "收尾进度"}
+                      {project.resolution?.revisitAt && project.resolution.revisitAt <= localDate() ? " · 待回看" : ""}
+                    </span>
                   </div>
                   <div className="project-note-progress">
                     <strong>{project.completionPercent}%</strong>
@@ -1226,16 +1101,7 @@ function ProjectsView(props: {
       </section>
 
       {createOpen ? (
-        <section className="project-create-plane" onClick={() => setCreateOpen(false)}>
-          <div className="project-create-card" onClick={(event) => event.stopPropagation()}>
-            <header>
-              <div>
-                <h2>新增项目</h2>
-              </div>
-              <button className="icon-button" onClick={() => setCreateOpen(false)} aria-label="关闭新增项目">
-                <X size={18} />
-              </button>
-            </header>
+        <Dialog title="新增项目" className="project-create-card continuity-create" onClose={() => { if (!props.busy) setCreateOpen(false); }}>
             <label>
               <span>项目标题</span>
               <input
@@ -1253,181 +1119,20 @@ function ProjectsView(props: {
                 placeholder="已有材料、剩余工作、阻塞点、理想关闭标准"
               />
             </label>
+            <IntakeFields value={intake} onChange={setIntake} />
+            {createError && <p className="form-error" role="alert">{createError}</p>}
             <div className="create-card-foot">
               <button
                 disabled={props.busy || !props.title.trim() || !props.brief.trim()}
-                onClick={() => {
-                  setCreateOpen(false);
-                  void props.onCreateProject();
+                onClick={async () => {
+                  try { await props.onCreateProject(intake); setCreateOpen(false); }
+                  catch (error) { setCreateError(error instanceof Error ? error.message : String(error)); }
                 }}
               >
                 加入总览
               </button>
             </div>
-          </div>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-function ProjectDetail(props: {
-  project: LongTailProject;
-  sessions: ResidencySession[];
-  busy: boolean;
-  onBack: () => void;
-  onUpdateTask: (taskId: string, patch: Partial<WorkUnit>) => Promise<void>;
-  onReanalyze: () => Promise<void>;
-  onUpdateBrief: (brief: string) => Promise<void>;
-  onSetArchived: (archived: boolean) => Promise<void>;
-  onOpenSession: () => void;
-}): JSX.Element {
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [briefOpen, setBriefOpen] = useState(false);
-  const [briefDraft, setBriefDraft] = useState(props.project.brief);
-  const selectedTask = props.project.taskGraph.tasks.find((task) => task.id === selectedTaskId) ?? null;
-  const nextTask = nextReadyTask(props.project);
-  const recentSession = props.sessions[0] ?? null;
-
-  useEffect(() => {
-    setBriefDraft(props.project.brief);
-  }, [props.project.brief]);
-
-  useEffect(() => {
-    if (!briefOpen) return;
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setBriefOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [briefOpen]);
-
-  return (
-    <div className="project-detail">
-      <div className="project-titleline">
-        <button className="back-button" onClick={props.onBack}>
-          <ArrowLeft size={17} />
-          返回总览
-        </button>
-        <div className="project-heading">
-          <h2>{props.project.title}</h2>
-        </div>
-        <div className="project-title-actions">
-          <button
-            className="icon-button"
-            onClick={() => setBriefOpen(true)}
-            title="更新项目事实"
-            aria-label="更新项目事实"
-          >
-            <FilePenLine size={15} />
-          </button>
-          <button
-            className="icon-button"
-            disabled={props.busy}
-            onClick={() => void props.onReanalyze()}
-            title="重建任务图"
-            aria-label="重建任务图"
-          >
-            <RotateCcw size={15} />
-          </button>
-          <button
-            className="icon-button"
-            disabled={props.busy}
-            onClick={() => void props.onSetArchived(!props.project.archivedAt)}
-            title={props.project.archivedAt ? "恢复项目" : "归档项目"}
-            aria-label={props.project.archivedAt ? "恢复项目" : "归档项目"}
-          >
-            {props.project.archivedAt ? <ArchiveRestore size={15} /> : <Archive size={15} />}
-          </button>
-          {!props.project.archivedAt ? (
-            <button className="cta-button" onClick={props.onOpenSession}>
-              <Timer size={15} />
-              开始驻留
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="detail-grid">
-        <article className="detail-card">
-          <span>当前状态</span>
-          <p>{props.project.currentState}</p>
-        </article>
-        <article className="detail-card">
-          <span>下一入口</span>
-          <p>
-            {nextTask
-              ? `${nextTask.title}：${nextTask.startAction}`
-              : "当前没有未阻塞的可执行任务。"}
-          </p>
-        </article>
-        <article className="detail-card">
-          <span>最近推进</span>
-          <p>
-            {recentSession
-              ? recentSession.judgement ?? recentSession.userNote ?? recentSession.log ?? recentSession.prompt
-              : "尚无驻留记录。"}
-          </p>
-        </article>
-        <article className="detail-card">
-          <span>关闭标准</span>
-          <p>{props.project.closeCriteria.join("；") || "尚未定义关闭标准。"}</p>
-        </article>
-      </div>
-
-      <WeightedProgress tasks={props.project.taskGraph.tasks} value={props.project.completionPercent} />
-
-      <div className="task-map-shell">
-        <div className="slab-head compact">
-          <strong>任务图</strong>
-        </div>
-        <TaskMap
-          tasks={props.project.taskGraph.tasks}
-          selectedTaskId={selectedTaskId}
-          onSelectTask={setSelectedTaskId}
-        />
-      </div>
-
-      {selectedTask ? (
-        <TaskEditor
-          task={selectedTask}
-          tasks={props.project.taskGraph.tasks}
-          busy={props.busy}
-          onClose={() => setSelectedTaskId(null)}
-          onSave={props.onUpdateTask}
-        />
-      ) : null}
-
-      {briefOpen ? (
-        <section className="project-brief-plane" onClick={() => setBriefOpen(false)}>
-          <div className="project-brief-card" onClick={(event) => event.stopPropagation()}>
-            <header>
-              <h3>更新项目事实</h3>
-              <button
-                className="icon-button"
-                onClick={() => setBriefOpen(false)}
-                aria-label="关闭项目事实"
-              >
-                <X size={17} />
-              </button>
-            </header>
-            <textarea
-              value={briefDraft}
-              onChange={(event) => setBriefDraft(event.target.value)}
-              autoFocus
-            />
-            <footer>
-              <button
-                disabled={props.busy || !briefDraft.trim()}
-                onClick={() => {
-                  void props.onUpdateBrief(briefDraft).then(() => setBriefOpen(false));
-                }}
-              >
-                保存并重建任务图
-              </button>
-            </footer>
-          </div>
-        </section>
+        </Dialog>
       ) : null}
     </div>
   );
@@ -1516,15 +1221,6 @@ function Pager(props: { page: number; totalPages: number; onChange: (value: numb
   );
 }
 
-function Block({ label, text }: { label: string; text: string }): JSX.Element {
-  return (
-    <div className="block-line">
-      <span>{label}</span>
-      <p>{text}</p>
-    </div>
-  );
-}
-
 function EmptyState({ label, detail }: { label: string; detail: string }): JSX.Element {
   return (
     <div className="empty-state">
@@ -1538,19 +1234,6 @@ function extractPayload(request: unknown): { target?: string; id?: string } | nu
   if (typeof request !== "object" || request === null || !("payload" in request)) return null;
   const payload = (request as { payload: unknown }).payload;
   return typeof payload === "object" && payload !== null ? (payload as { target?: string; id?: string }) : null;
-}
-
-function useElapsedSeconds(startedAt: string, endedAt?: string): number {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (endedAt) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [endedAt]);
-
-  const end = endedAt ? new Date(endedAt).getTime() : now;
-  return Math.max(0, Math.floor((end - new Date(startedAt).getTime()) / 1000));
 }
 
 function useViewport(): { width: number; height: number } {
@@ -1572,23 +1255,6 @@ function useViewport(): { width: number; height: number } {
   }, []);
 
   return viewport;
-}
-
-function nextReadyTask(project: LongTailProject): WorkUnit | null {
-  if (project.archivedAt) return null;
-  const byId = new Map(project.taskGraph.tasks.map((task) => [task.id, task]));
-  return (
-    project.taskGraph.tasks
-      .filter((task) => ["todo", "in_progress", "unknown"].includes(task.status))
-      .filter((task) =>
-        task.dependsOn.every((dependencyId) => byId.get(dependencyId)?.status === "done")
-      )
-      .sort((left, right) => {
-        const statusDifference =
-          Number(right.status === "in_progress") - Number(left.status === "in_progress");
-        return statusDifference || right.weight - left.weight;
-      })[0] ?? null
-  );
 }
 
 function projectPageSize(_width: number, height: number): number {
@@ -1638,9 +1304,7 @@ function formatSessionMinutes(session: ResidencySession): string {
   }
   const actualMinutes = Math.max(
     1,
-    Math.round(
-      (new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 60_000
-    )
+    Math.round(sessionElapsedSeconds(session) / 60)
   );
   return `${actualMinutes} / ${session.minutesPlanned} 分钟`;
 }
@@ -1659,39 +1323,7 @@ function residencyTheme(position: number): CSSProperties {
     "--energy-bg": mix(lower.background, upper.background),
     "--energy-soft": mix(lower.soft, upper.soft),
     "--energy-accent": mix(lower.accent, upper.accent),
-    "--energy-ink": clamped < 1.5 ? "#202820" : "#fff7e8",
-    "--energy-muted": clamped < 1.5 ? "rgba(32, 40, 32, 0.68)" : "rgba(255, 247, 232, 0.74)"
-  } as CSSProperties;
-}
-
-const skyThemeStops = [
-  { at: 0, background: [222, 191, 163], soft: [245, 229, 215], accent: [162, 96, 66] },
-  { at: 0.16, background: [169, 197, 211], soft: [224, 235, 238], accent: [75, 111, 132] },
-  { at: 0.4, background: [114, 165, 193], soft: [205, 224, 232], accent: [48, 91, 117] },
-  { at: 0.58, background: [215, 132, 94], soft: [244, 216, 202], accent: [133, 65, 50] },
-  { at: 0.7, background: [100, 73, 99], soft: [219, 201, 214], accent: [65, 39, 65] },
-  { at: 0.84, background: [35, 43, 69], soft: [75, 83, 111], accent: [222, 175, 120] },
-  { at: 1, background: [222, 191, 163], soft: [245, 229, 215], accent: [162, 96, 66] }
-] as const;
-
-function sessionSkyTheme(elapsedSeconds: number): CSSProperties {
-  const cycleSeconds = 10 * 60;
-  const progress = (elapsedSeconds % cycleSeconds) / cycleSeconds;
-  const upperIndex = skyThemeStops.findIndex((stop) => stop.at >= progress);
-  const safeUpperIndex = upperIndex <= 0 ? 1 : upperIndex;
-  const lower = skyThemeStops[safeUpperIndex - 1];
-  const upper = skyThemeStops[safeUpperIndex];
-  const ratio = (progress - lower.at) / Math.max(upper.at - lower.at, 0.001);
-  const mix = (from: readonly number[], to: readonly number[]): string =>
-    `rgb(${from.map((channel, index) => Math.round(channel + (to[index] - channel) * ratio)).join(", ")})`;
-  const night = progress >= 0.67 && progress < 0.95;
-
-  return {
-    "--energy-bg": mix(lower.background, upper.background),
-    "--energy-soft": mix(lower.soft, upper.soft),
-    "--energy-accent": mix(lower.accent, upper.accent),
-    "--energy-ink": night ? "#fff4ea" : "#293238",
-    "--energy-muted": night ? "rgba(255, 244, 234, 0.7)" : "rgba(41, 50, 56, 0.68)",
-    "--day-progress": `${progress}`
+    "--energy-ink": "#203b32",
+    "--energy-muted": "rgba(32, 59, 50, 0.68)"
   } as CSSProperties;
 }

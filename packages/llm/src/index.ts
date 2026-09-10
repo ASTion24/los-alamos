@@ -56,6 +56,9 @@ export class OpenAiCompatibleProvider implements LlmProvider {
           "Use Chinese for generated copy unless the user's brief clearly uses another language.",
           "Every leaf task needs a concrete start action, completion criterion, explicit out-of-scope boundary,",
           "effortMinutes, intensity (low|medium|high|xhigh), weight, dependencies, and status.",
+          "Model remaining closure work, not a generic planning workflow. Planning-only tasks have weight 0.",
+          "A self-reported overall progress estimate is not evidence of task completion. Do not translate it into task percentages.",
+          "One task is sufficient. Never invent dependencies or unnecessary work.",
           "Use unknowns instead of inventing facts. Keep the response concise enough for an interactive desktop tool."
         ].join(" ")
       },
@@ -64,6 +67,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         content: JSON.stringify({
           title: input.title,
           brief: input.brief,
+          intake: input.intake,
+          latestConfirmedContext: input.context,
           output: {
             goal: "string",
             currentState: "string",
@@ -230,8 +235,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
 function buildProject(input: AnalyzeProjectInput, raw: unknown): LongTailProject {
   const object = asObject(raw, "analysis");
   const rawTasks = asArray(object.tasks, "tasks");
-  if (rawTasks.length < 2) {
-    throw new Error("LLM analysis must contain at least two tasks.");
+  if (rawTasks.length < 1 || rawTasks.length > 50) {
+    throw new Error("LLM analysis must contain between one and fifty tasks.");
   }
 
   const tasks = rawTasks.map((task, index) => normalizeTask(task, index));
@@ -262,6 +267,12 @@ function buildProject(input: AnalyzeProjectInput, raw: unknown): LongTailProject
     completionPercent: 0,
     confidence: "low",
     compact: asString(object.compact, "compact"),
+    intake: input.intake,
+    capsule: {
+      summary: asString(object.currentState, "currentState"),
+      decisions: [], artifacts: [], blocker: stringArray(object.unknowns, "unknowns").join("\n"),
+      nextAction: "", notDoing: "", updatedAt: input.now
+    },
     createdAt: input.now,
     updatedAt: input.now,
     updatedBy: "llm",
@@ -285,7 +296,7 @@ function normalizeTask(raw: unknown, index: number): WorkUnit {
     dependsOn: stringArray(object.dependsOn, `tasks[${index}].dependsOn`),
     effortMinutes: positiveNumber(object.effortMinutes, 25),
     intensity: enumValue(object.intensity, ["low", "medium", "high", "xhigh"], "medium") as Intensity,
-    weight: positiveNumber(object.weight, 10),
+    weight: boundedNumber(object.weight, 0, 10000, 10),
     progressPercent:
       object.status === "done"
         ? 100

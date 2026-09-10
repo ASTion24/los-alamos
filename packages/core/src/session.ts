@@ -3,9 +3,11 @@ import type {
   ResidencySession,
   SessionAssessment,
   SessionResult,
+  ContextCapsule,
   WorkUnit
 } from "./types";
 import { refreshProjectProgress } from "./progress";
+import { projectCapsule, sessionElapsedSeconds } from "./context";
 
 export interface CloseSessionInput {
   project: LongTailProject;
@@ -14,6 +16,7 @@ export interface CloseSessionInput {
   note?: string;
   now: string;
   assessment?: SessionAssessment;
+  handoff?: ContextCapsule;
 }
 
 export interface CloseSessionOutput {
@@ -24,9 +27,33 @@ export interface CloseSessionOutput {
 
 export function closeSession(input: CloseSessionInput): CloseSessionOutput {
   const task = input.project.taskGraph.tasks.find((candidate) => candidate.id === input.session.taskId);
+  if (!task) throw new Error("驻留任务已不存在，请先恢复对应任务再记录结果。");
   const updatedTask = task
-    ? updateTaskFromResult(task, input.result, input.session, input.note, input.assessment)
+    ? updateTaskFromResult(task, input.result, input.session, input.note)
     : null;
+  const tasks = input.project.taskGraph.tasks.map((candidate) =>
+    candidate.id === updatedTask?.id ? updatedTask : candidate
+  );
+  const next = updatedTask?.status !== "done" ? updatedTask : tasks.find((candidate) =>
+    ["todo", "in_progress", "unknown"].includes(candidate.status) &&
+    candidate.dependsOn.every((id) => tasks.find((dependency) => dependency.id === id)?.status === "done")
+  );
+  const previous = projectCapsule(input.project);
+  const capsule: ContextCapsule = {
+    ...previous,
+    summary: input.note?.trim() || (updatedTask
+      ? makeProjectCompact(input.project.title, updatedTask, input.result) : previous.summary),
+    nextAction: next?.startAction ?? "",
+    notDoing: next?.notDoing ?? previous.notDoing,
+    taskId: next?.id,
+    ...input.handoff,
+    updatedAt: input.now
+  };
+  // A handoff for a finished task must never override the next task's entrance.
+  if (updatedTask?.status === "done") {
+    capsule.taskId = next?.id;
+    if (!input.handoff?.nextAction) capsule.nextAction = next?.startAction ?? "";
+  }
 
   const projectWithTask = updatedTask
     ? {
@@ -36,9 +63,9 @@ export function closeSession(input: CloseSessionInput): CloseSessionOutput {
             candidate.id === updatedTask.id ? updatedTask : candidate
           )
         },
-        compact:
-          input.assessment?.compact ??
-          makeProjectCompact(input.project.title, updatedTask, input.result, input.note),
+        compact: capsule.summary,
+        capsule,
+        currentState: capsule.summary,
         updatedAt: input.now,
         updatedBy: "app" as const,
         revision: input.project.revision + 1
@@ -55,6 +82,9 @@ export function closeSession(input: CloseSessionInput): CloseSessionOutput {
     endedAt: input.now,
     userResult: input.result,
     userNote: input.note,
+    handoff: capsule,
+    elapsedSeconds: sessionElapsedSeconds(input.session, Date.parse(input.now)),
+    lastResumedAt: undefined,
     judgement,
     log: makeSessionLog(input.session, input.result, input.note, judgement, project.completionPercent),
     updatedAt: input.now,
@@ -73,8 +103,7 @@ function updateTaskFromResult(
   task: WorkUnit,
   result: SessionResult,
   session: ResidencySession,
-  note?: string,
-  assessment?: SessionAssessment
+  note?: string
 ): WorkUnit {
   if (result === "completed" && session.scope === "full_task") {
     return {
@@ -86,28 +115,10 @@ function updateTaskFromResult(
   }
 
   if (result === "partial" || (result === "completed" && session.scope === "checkpoint")) {
-    const plannedShare = Math.min(1, session.minutesPlanned / Math.max(task.effortMinutes, 1));
-    const creditedShare = result === "completed" ? plannedShare : plannedShare * 0.5;
-    const assessedProgress = assessment?.taskProgressPercent;
-    const progressPercent = Math.min(95, Math.max(
-      task.progressPercent ?? 0,
-      typeof assessedProgress === "number"
-        ? assessedProgress
-        : (task.progressPercent ?? 0) + creditedShare * 100
-    ));
     return {
       ...task,
       status: "in_progress",
-      progressPercent: Math.round(progressPercent),
-      notes: appendNote(task.notes, note)
-    };
-  }
-
-  if (assessment && assessment.taskProgressPercent > (task.progressPercent ?? 0)) {
-    return {
-      ...task,
-      status: "in_progress",
-      progressPercent: Math.min(95, Math.round(assessment.taskProgressPercent)),
+      progressPercent: task.progressPercent,
       notes: appendNote(task.notes, note)
     };
   }

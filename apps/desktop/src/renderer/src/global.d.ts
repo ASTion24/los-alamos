@@ -4,13 +4,23 @@ import type {
   ResidencySession,
   SessionResult,
   WorkUnit,
-  WorkspaceHealth
+  WorkspaceHealth,
+  ContextCapsule, ProjectIntake, ProjectOutcome, ResidencyPlan, PlanDraft,
+  AttentionCapture, CaptureConversion, FocusConstraints, FocusPreview
 } from "./types";
 
 declare global {
   interface Window {
     los: {
       platform: NodeJS.Platform;
+      listCaptures: () => Promise<AttentionCapture[]>;
+      captureThought: (input: { text: string; sourceSessionId?: string }) => Promise<AttentionCapture>;
+      shelveCapture: (input: { id: string; shelved: boolean }) => Promise<AttentionCapture>;
+      convertCapture: (input: CaptureConversion) => Promise<LongTailProject>;
+      previewFocus: (input: FocusConstraints) => Promise<FocusPreview>;
+      startFocus: (input: FocusConstraints & { token: string }) => Promise<ResidencySession>;
+      openArtifact: (input: { projectId: string; artifact: string }) => Promise<void>;
+      attachArtifacts: (projectId: string) => Promise<LongTailProject | null>;
       workspaceRoot: () => Promise<string>;
       showWorkspace: () => Promise<string>;
       getAboutState: () => Promise<{
@@ -22,11 +32,12 @@ declare global {
         shouldShow: boolean;
       }>;
       listProjects: () => Promise<LongTailProject[]>;
-      createProject: (input: { title: string; brief: string }) => Promise<LongTailProject>;
+      createProject: (input: { title: string; brief: string; intake?: ProjectIntake }) => Promise<LongTailProject>;
       reanalyzeProject: (projectId: string) => Promise<LongTailProject>;
       updateProjectBrief: (input: {
         projectId: string;
         brief: string;
+        intake?: ProjectIntake;
       }) => Promise<LongTailProject>;
       setProjectArchived: (input: {
         projectId: string;
@@ -38,14 +49,23 @@ declare global {
         patch: Partial<WorkUnit>;
       }) => Promise<LongTailProject>;
       listSessions: () => Promise<ResidencySession[]>;
-      proposeSession: (input: { minutes: number; intensity: Intensity }) => Promise<ResidencySession | null>;
+      proposeSession: (input: { minutes: number; intensity: Intensity; projectId?: string }) => Promise<ResidencySession | null>;
       startSession: (sessionId: string) => Promise<ResidencySession>;
       cancelSessionProposal: (sessionId: string) => Promise<ResidencySession>;
       closeSession: (input: {
         sessionId: string;
         result: SessionResult;
         note?: string;
+        handoff?: ContextCapsule;
       }) => Promise<ResidencySession>;
+      pauseSession: (id: string) => Promise<ResidencySession>;
+      resumeSession: (id: string) => Promise<ResidencySession>;
+      reviseProposal: (input: { id: string; startAction: string; completionCriteria: string; notDoing: string }) => Promise<ResidencySession>;
+      updateCapsule: (input: { projectId: string; capsule: ContextCapsule }) => Promise<LongTailProject>;
+      resolveProject: (input: { projectId: string; outcome: ProjectOutcome | "active"; note: string; evidence?: string; revisitAt?: string }) => Promise<LongTailProject>;
+      listPlans: () => Promise<ResidencyPlan[]>;
+      savePlan: (input: { id?: string; draft: PlanDraft }) => Promise<ResidencyPlan>;
+      transitionPlan: (input: { id: string; status: "committed" | "active" | "closed"; note?: string }) => Promise<ResidencyPlan>;
       getWorkspaceHealth: () => Promise<WorkspaceHealth>;
       getSettings: () => Promise<{
         baseUrl: string;

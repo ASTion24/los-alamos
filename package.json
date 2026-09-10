@@ -1,9 +1,16 @@
 {
   "name": "los-alamos",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "author": "xuanran.916",
-  "description": "A quiet desktop workspace for closing long-tail projects through LLM-assisted context compacting.",
+  "description": "A local-first desktop workspace for closing long-tail projects through focused residency sessions.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ASTion24/los-alamos.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ASTion24/los-alamos/issues"
+  },
   "desktopName": "los-alamos.desktop",
   "main": "out/main/index.js",
   "engines": {
@@ -59,8 +66,10 @@
     ],
     "extraResources": [
       "README.md",
+      "CHANGELOG.md",
       "AGENTS.md",
       "CLAUDE.md",
+      "docs",
       "schemas",
       "skills",
       {

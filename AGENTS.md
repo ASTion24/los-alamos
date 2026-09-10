@@ -35,6 +35,7 @@ The files below `workspace.root` are the public protocol:
 - `projects/<project-id>/model.json`: task graph and progress model.
 - `projects/<project-id>/events.jsonl`: append-only audit log.
 - `sessions/<session-id>.json`: session record.
+- `plans/<plan-id>.json`: optional residency plan; `plans/events.jsonl` is append-only.
 - `schemas/*.schema.json`: JSON contracts.
 
 Do not add fields casually. Preserve `schemaVersion`, `revision`, `updatedAt`, and `updatedBy`.
@@ -95,3 +96,27 @@ Completion is computed from leaf task weights. If the task graph changes, update
 Completing a session with `scope: checkpoint` must leave the parent task `in_progress`; only `scope: full_task` may close it.
 
 `session propose` only creates a reviewable proposal. Time begins when `session start` changes it to `active`.
+
+## Continuity And Closure
+
+- Product source development is separate from this runtime protocol. When explicitly asked to develop Los Alamos itself, do not start a residency or modify real project/session data.
+- `brief.md` includes the optional `los-alamos:intake` JSON block of user-confirmed completed work, remaining actions, closing criteria, and starting estimate. Do not convert a self-reported percentage into calculated task completion.
+- Use `project capsule <id> --file <capsule.json> --json` for confirmed handoffs: `summary`, `decisions`, `artifacts`, `blocker`, `nextAction`, `notDoing`, optional `taskId`, and `updatedAt`.
+- Use `session close ... --handoff-file <capsule.json>` to retain the exact re-entry point. Time spent never awards progress. Partial/checkpoint results keep the parent open; explicit `task update --progress` is for evidence-based calibration.
+- Use `session pause <id>` and `session resume <id>`. `residency_paused` requires confirmation before resuming. A paused session may be closed from user feedback.
+- Use `session propose ... --project <id>` when the user selects one project. Preserve this selection in `agent context ... --project <id>`.
+- `no_eligible_task` means inspect facts, dependencies, and closure criteria; never repeatedly propose or silently raise intensity. `modelNeedsReview` blocks stale graphs after facts change.
+- `plan_attention` means a date, intensity, or capacity boundary has been reached. Never expand capacity automatically.
+- `project resolve <id> --outcome <closed|parked|waiting|killed|active> --note <reason>` requires an explicit user decision. `closed` also needs `--evidence`; `parked` needs `--revisit YYYY-MM-DD`; `waiting` must name the external condition in the note. Resolution does not falsify progress.
+- `plan save --file <plan.json> [--id <id>]`, `plan commit <id>`, `plan start <id>`, `plan close <id> --note <result>` manage one optional residency plan. The user must confirm starting/closing; draft/committed plans do not block one-off work.
+- `open plans` opens the residency plan surface. Re-read context after every mutation.
+
+## Attention Launcher
+
+- The desktop defaults to `open home`, a focused entrance rather than the project library.
+- `inbox add --text <verbatim-thought> [--session <id>]` saves an unstructured thought without creating a task or changing progress. Read with `inbox list`; use `inbox shelve <id>` / `inbox restore <id>` for reversible attention decisions.
+- `inbox prepare <id> --title <title> --remaining <actions> --closing <criterion>` converts one capture only after the user confirms the remaining work and stopping point. Original text and append-only events remain under `inbox/`. Suggestions are not confirmed facts.
+- `focus preview --minutes <n> --intensity <level> [--project <id>]` is read-only with respect to sessions. Present its exact task, action, completion criterion, boundary, and constraints.
+- Only after explicit confirmation, `focus start` with the same constraints and `--token <preview-token>` atomically creates and starts that exact proposal. Stale tokens are rejected. Never silently refresh a token and start without renewed confirmation.
+- Capturing a distraction during an active session does not authorize switching projects, pausing, increasing scope, or doing the captured work.
+- Open materials only on an explicit user action. The desktop allows recorded HTTP(S) links and known document formats; executable/unknown local targets are revealed in the file manager, not executed.

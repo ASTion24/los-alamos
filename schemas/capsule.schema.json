@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://los-alamos.local/schemas/capsule.schema.json",
+  "title": "Los Alamos ContextCapsule",
+  "type": "object",
+  "required": ["summary", "decisions", "artifacts", "blocker", "nextAction", "notDoing", "updatedAt"],
+  "properties": {
+    "summary": { "type": "string", "maxLength": 20000 },
+    "decisions": { "type": "array", "maxItems": 100, "items": { "type": "string" } },
+    "artifacts": { "type": "array", "maxItems": 100, "items": { "type": "string" } },
+    "blocker": { "type": "string" },
+    "nextAction": { "type": "string" },
+    "notDoing": { "type": "string" },
+    "taskId": { "type": "string" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

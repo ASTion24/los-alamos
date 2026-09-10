@@ -102,7 +102,7 @@ export function WeightedProgress({ tasks, value }: { tasks: WorkUnit[]; value: n
   return (
     <div className="weighted-progress">
       <div className="weighted-progress-label">
-        <span>加权完成度</span>
+        <span>加权收尾进度</span>
         <strong>{value}%</strong>
       </div>
       <div className="weighted-progress-track" aria-label={`完成度 ${value}%`}>

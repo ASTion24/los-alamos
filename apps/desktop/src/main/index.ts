@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor, safeStorage, shell } from "electron";
 import { dirname, join } from "node:path";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { watch } from "node:fs";
@@ -17,18 +17,24 @@ import {
   setProjectArchived,
   startWorkspaceSession,
   updateProjectBrief,
-  updateProjectTask
+  updateProjectTask,
+  listPlans, savePlan, transitionPlan, resolveProject, updateProjectCapsule,
+  pauseWorkspaceSession, resumeWorkspaceSession, recoverInterruptedSessions, heartbeatSession, reviseProposal,
+  listCaptures, captureThought, setCaptureShelved, convertCapture, previewFocus, startFocus, resolveArtifact, readProject
 } from "../../../../packages/workspace/src";
+import { projectCapsule, sessionElapsedSeconds } from "../../../../packages/core/src";
 import type {
   Intensity,
   ResidencySession,
   SessionResult,
-  WorkUnit
+  WorkUnit,
+  ProjectIntake, ContextCapsule, CaptureConversion, FocusConstraints
 } from "../../../../packages/core/src";
 
 let mainWindow: BrowserWindow | null = null;
 let workspaceChangeTimer: NodeJS.Timeout | null = null;
 const sessionDeadlineTimers = new Map<string, NodeJS.Timeout>();
+let deadlineKey = "";
 
 interface LlmStoreSettings {
   baseUrl: string;
@@ -79,6 +85,7 @@ function createWindow(): void {
   mainWindow.webContents.once("did-finish-load", () => {
     void deliverPendingOpenRequest();
   });
+  mainWindow.on("closed", () => { void pauseAllSessions("窗口关闭，驻留已暂停。"); });
 
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -90,7 +97,7 @@ function createWindow(): void {
 function registerIpc(): void {
   ipcMain.handle("workspace:root", async () => ensureWorkspace());
   ipcMain.handle("projects:list", async () => listProjects());
-  ipcMain.handle("projects:create", async (_event, input: { title: string; brief: string }) => {
+  ipcMain.handle("projects:create", async (_event, input: { title: string; brief: string; intake?: ProjectIntake }) => {
     const provider = await getProviderWithFallback(
       "模型配置不可用，已使用本地建模继续创建。"
     );
@@ -128,7 +135,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(
     "projects:update-brief",
-    async (_event, input: { projectId: string; brief: string }) => updateProjectBrief(input)
+    async (_event, input: { projectId: string; brief: string; intake?: ProjectIntake }) => updateProjectBrief(input)
   );
   ipcMain.handle(
     "projects:set-archived",
@@ -147,10 +154,63 @@ function registerIpc(): void {
     ) => updateProjectTask(input)
   );
   ipcMain.handle("sessions:list", async () => listSessions());
+  ipcMain.handle("inbox:list", () => listCaptures());
+  ipcMain.handle("inbox:capture", (_event, input: { text: string; sourceSessionId?: string }) =>
+    captureThought({ text: input.text, sourceSessionId: input.sourceSessionId }));
+  ipcMain.handle("inbox:shelve", (_event, input: { id: string; shelved: boolean }) =>
+    setCaptureShelved({ id: input.id, shelved: input.shelved }));
+  ipcMain.handle("inbox:convert", (_event, input: CaptureConversion) =>
+    convertCapture({ id: input.id, title: input.title, remaining: input.remaining, closeCriteria: input.closeCriteria }));
+  ipcMain.handle("focus:preview", (_event, input: FocusConstraints) =>
+    previewFocus({ minutes: input.minutes, intensity: input.intensity, projectId: input.projectId }));
+  ipcMain.handle("focus:start", async (_event, input: FocusConstraints & { token: string }) => {
+    const session = await startFocus({ minutes: input.minutes, intensity: input.intensity, projectId: input.projectId, token: input.token });
+    scheduleSessionDeadline(session);
+    return session;
+  });
+  ipcMain.handle("artifacts:open", async (_event, input: { projectId: string; artifact: string }) => {
+    const artifact = await resolveArtifact(input.projectId, input.artifact);
+    if (artifact.kind === "url") await shell.openExternal(artifact.target);
+    else if (artifact.kind === "reveal") shell.showItemInFolder(artifact.target);
+    else {
+      const error = await shell.openPath(artifact.target);
+      if (error) throw new Error(error);
+    }
+  });
+  ipcMain.handle("artifacts:attach", async (_event, projectId: string) => {
+    if (!mainWindow) throw new Error("应用窗口不可用。");
+    await readProject(projectId);
+    const result = await dialog.showOpenDialog(mainWindow, { title: "选择工作材料", properties: ["openFile", "multiSelections"] });
+    if (result.canceled) return null;
+    const project = await readProject(projectId);
+    const capsule = projectCapsule(project);
+    return updateProjectCapsule({ projectId, capsule: { ...capsule, artifacts: [...new Set([...capsule.artifacts, ...result.filePaths])] } });
+  });
+  ipcMain.handle("plans:list", () => listPlans());
+  ipcMain.handle("plans:save", (_event, input: Parameters<typeof savePlan>[0]) =>
+    savePlan({ id: input.id, draft: input.draft }));
+  ipcMain.handle("plans:transition", (_event, input: Parameters<typeof transitionPlan>[0]) =>
+    transitionPlan({ id: input.id, status: input.status, note: input.note }));
+  ipcMain.handle("projects:capsule", (_event, input: Parameters<typeof updateProjectCapsule>[0]) =>
+    updateProjectCapsule({ projectId: input.projectId, capsule: input.capsule }));
+  ipcMain.handle("projects:resolve", (_event, input: Parameters<typeof resolveProject>[0]) =>
+    resolveProject({ projectId: input.projectId, outcome: input.outcome, note: input.note, evidence: input.evidence, revisitAt: input.revisitAt }));
+  ipcMain.handle("sessions:revise", (_event, input: Parameters<typeof reviseProposal>[0]) =>
+    reviseProposal({ id: input.id, startAction: input.startAction, completionCriteria: input.completionCriteria, notDoing: input.notDoing }));
+  ipcMain.handle("sessions:pause", async (_event, id: string) => {
+    const session = await pauseWorkspaceSession(id);
+    cancelSessionDeadline(id);
+    return session;
+  });
+  ipcMain.handle("sessions:resume", async (_event, id: string) => {
+    const session = await resumeWorkspaceSession(id);
+    scheduleSessionDeadline(session);
+    return session;
+  });
   ipcMain.handle(
     "sessions:propose",
-    async (_event, input: { minutes: number; intensity: Intensity }) => {
-      const session = await proposeSession(input.minutes, input.intensity);
+    async (_event, input: { minutes: number; intensity: Intensity; projectId?: string }) => {
+      const session = await proposeSession(input.minutes, input.intensity, undefined, input.projectId);
       return session;
     }
   );
@@ -164,24 +224,9 @@ function registerIpc(): void {
   );
   ipcMain.handle(
     "sessions:close",
-    async (_event, input: { sessionId: string; result: SessionResult; note?: string }) => {
-      const provider = await getProviderWithFallback(
-        "模型配置不可用，已使用本地规则完成驻留记录。"
-      );
+    async (_event, input: { sessionId: string; result: SessionResult; note?: string; handoff?: ContextCapsule }) => {
       const session = await closeWorkspaceSession({
-        ...input,
-        assessor: provider
-          ? async (assessmentInput) => {
-              try {
-                return await provider.assessSession(assessmentInput);
-              } catch (error) {
-                sendOperationWarning(
-                  `模型评估失败，已使用本地规则完成驻留记录。${providerErrorSummary(error)}`
-                );
-                return undefined;
-              }
-            }
-          : undefined
+        sessionId: input.sessionId, result: input.result, note: input.note, handoff: input.handoff
       });
       cancelSessionDeadline(session.id);
       return session;
@@ -376,11 +421,14 @@ async function watchWorkspaceChanges(): Promise<void> {
     if (workspaceChangeTimer) clearTimeout(workspaceChangeTimer);
     workspaceChangeTimer = setTimeout(() => {
       mainWindow?.webContents.send("workspace-changed");
+      void refreshDeadline();
     }, 140);
   };
 
   watchDirectory(paths.projects, notify);
   watchDirectory(paths.sessions, notify);
+  watchDirectory(paths.plans, notify);
+  watchDirectory(paths.inbox, notify);
 }
 
 function watchDirectory(path: string, listener: () => void): void {
@@ -431,9 +479,8 @@ function sendOperationWarning(message: string): void {
 function scheduleSessionDeadline(session: ResidencySession): void {
   cancelSessionDeadline(session.id);
   if (session.status !== "active") return;
-  const deadline =
-    new Date(session.startedAt).getTime() + Math.max(1, session.minutesPlanned) * 60_000;
-  const delay = Math.max(1_000, deadline - Date.now());
+  deadlineKey = `${session.id}:${session.lastResumedAt ?? session.startedAt}`;
+  const delay = Math.max(1_000, (session.minutesPlanned * 60 - sessionElapsedSeconds(session)) * 1000);
   const timer = setTimeout(() => {
     sessionDeadlineTimers.delete(session.id);
     if (Notification.isSupported()) {
@@ -458,17 +505,56 @@ app.whenReady().then(async () => {
     process.env.LOS_ALAMOS_WORKSPACE ??= join(app.getPath("documents"), "Los Alamos");
     process.env.LOS_ALAMOS_PROTOCOL_ROOT = process.resourcesPath;
   }
+  await recoverInterruptedSessions();
   registerIpc();
   createWindow();
   await watchOpenRequests();
   await watchWorkspaceChanges();
   const activeSession = (await listSessions()).find((session) => session.status === "active");
   if (activeSession) scheduleSessionDeadline(activeSession);
+  setInterval(() => {
+    void listSessions().then(async (sessions) => {
+      const active = sessions.find((session) => session.status === "active");
+      if (active) await heartbeatSession(active.id);
+    }).catch((error) => sendOperationWarning(providerErrorSummary(error)));
+  }, 15_000).unref();
+  powerMonitor.on("suspend", () => { void pauseAllSessions("系统休眠，驻留已暂停。"); });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
+  });
+});
+
+async function pauseAllSessions(reason: string): Promise<void> {
+  try {
+    for (const session of await listSessions()) {
+      if (session.status === "active") {
+        await pauseWorkspaceSession(session.id, undefined, reason);
+        cancelSessionDeadline(session.id);
+      }
+    }
+  } catch (error) { sendOperationWarning(providerErrorSummary(error)); }
+}
+
+async function refreshDeadline(): Promise<void> {
+  try {
+    const active = (await listSessions()).find((session) => session.status === "active");
+    if (!active) {
+      for (const id of sessionDeadlineTimers.keys()) cancelSessionDeadline(id);
+      deadlineKey = "";
+    } else if (deadlineKey !== `${active.id}:${active.lastResumedAt ?? active.startedAt}`) scheduleSessionDeadline(active);
+  } catch (error) { sendOperationWarning(providerErrorSummary(error)); }
+}
+
+let quitConfirmed = false;
+app.on("before-quit", (event) => {
+  if (quitConfirmed) return;
+  event.preventDefault();
+  void pauseAllSessions("应用退出，驻留已暂停。").finally(() => {
+    quitConfirmed = true;
+    app.quit();
   });
 });
 

@@ -1,61 +1,111 @@
-# 关于 Los Alamos
+# Los Alamos
+
+> 不用先把自己管理好，也能开始。
+
+[![Version](https://img.shields.io/github/v/release/ASTion24/los-alamos?display_name=tag&sort=semver)](https://github.com/ASTion24/los-alamos/releases)
+[![CI](https://github.com/ASTion24/los-alamos/actions/workflows/ci.yml/badge.svg)](https://github.com/ASTion24/los-alamos/actions/workflows/ci.yml)
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-315f52)
+![Local first](https://img.shields.io/badge/data-local--first-bb9476)
 
 Los Alamos 是一个用于关闭长尾项目的本地桌面工作区。
 
-它不代替用户完成真实工作。它负责收拢上下文、拆分依赖、按时间与精力选择一个可验证入口，并在每段驻留结束后压缩进度，让长期悬置的项目能够被连续推进。
+它面对的不是“没有计划”，而是另一种更常见的困境：工作已经完成了
+70% 到 90%，剩余部分却长期悬置；每次回来都要重新理解上下文，最后连
+“什么时候认真收尾”也变成一件未完成的事。
 
-## 设计原则
+Los Alamos 把这段负担压缩成一个可以立刻进入的动作，并在离开时替你保管
+下一次所需的上下文。它不替你完成真实工作，也不把生活改造成待办清单。
 
-- **一次只处理一个入口**：驻留始终围绕一个明确的最小任务。
-- **边界先于执行**：开始动作、完成标准与明确不做必须在计时前可见。
-- **事实先于推断**：`brief.md` 保存用户事实；任务图与完成度从事实和叶任务权重推导。
-- **规划不越界**：Los Alamos 管理上下文、调度和记录，不替用户完成项目本身。
-- **本地优先**：不配置 API 也能使用；配置 LLM 后自动增强，失败时回退本地规则。
+<img src="docs/assets/attention-launcher.png" alt="Los Alamos 此刻工作台：展示唯一下一动作、边界、材料入口和收纳箱" width="100%">
+
+## 此刻，只带走一件
+
+默认首页不再要求先建模、分类或配置一套系统。主路径只有三个动作：
+
+1. **先收下**：用一句原话保存挂念。它暂时不是任务，不增加进度，也不要求承诺日期。
+2. **只带走一件**：首页展示本轮具体动作、完成标准、不做边界和材料入口；确认后才开始计时。
+3. **留好下次入口**：结束时默认只记录“停在哪里”和“下次做什么”。回来后直接从这个入口继续。
+
+当最后一个动作完成，可以当场确认项目收尾。关闭需要证据；暂存需要回看日期；
+等待需要明确外部条件。Los Alamos 不用“100%”掩盖仍未解决的状态。
+
+## 为什么不是另一款待办工具
+
+- **收纳不等于承诺**：想到的事可以先离开大脑，不必立刻变成项目。
+- **边界先于执行**：开始动作、完成标准和明确不做在计时前可见。
+- **时间不制造进度**：部分完成和检查点不会因为工作了若干分钟而自动涨百分比。
+- **中断不会吞掉上下文**：暂停、退出、休眠和异常中断都保留最后确认的活动时间。
+- **多日计划是可选容器**：日期、容量和强度可以约束 Residency，但不会成为开始工作的前置手续。
+- **事实先于模型**：用户自述的“已完成 80%”与任务图计算进度分开保存。
+- **本地规则始终可用**：不配置 API 也能工作；LLM 失败时自动回退，不阻断主路径。
+
+## 快速开始
+
+要求 Node.js `20.19.0` 或更高版本。
+
+```bash
+git clone https://github.com/ASTion24/los-alamos.git
+cd los-alamos
+npm ci
+npm run dev
+```
+
+运行测试和生产构建：
+
+```bash
+npm test
+npm run build
+```
+
+当前平台的本地安装包：
+
+```bash
+npm run dist
+```
+
+发布页提供 CI 构建的 macOS、Windows 和 Linux 预览包。未签名或未公证的包可能触发
+系统安全提示；正式 macOS 签名流程见
+[`docs/macos-signing.md`](docs/macos-signing.md)。
 
 ## 两条路径，一个工作区
 
 ### 原生应用
 
-打开 macOS、Windows 或 Linux 应用后，可以直接在界面中：
+桌面应用提供：
 
-- 添加项目并审阅任务依赖图；
-- 调整任务边界、强度、预计时间与进度；
-- 输入本轮可用时间和最高工作强度；
-- 审阅、开始和结束驻留；
-- 查看项目总览、归档与驻留记录。
+- “此刻”入口、挂念收纳箱与明确确认后的一键开始；
+- 项目交接、任务依赖图、历史和可选的多日驻留计划；
+- 暂停、恢复、检查点、两项快速交接与正式收尾；
+- 经用户点击后打开已记录材料；脚本和未知类型只定位，不执行；
+- OpenAI-compatible API 主机、模型与密钥配置，本地规则自动兜底。
 
-应用数据位于系统“文稿/Documents”目录下的 `Los Alamos/`。API 密钥通过 Electron
-`safeStorage` 保存；Linux 桌面应启用 Secret Service 或 KWallet 等系统密钥环。
+数据默认位于系统“文稿/Documents”目录下的 `Los Alamos/`。API 密钥通过
+Electron `safeStorage` 保存；Linux 桌面应启用 Secret Service 或 KWallet。
 
 ### Agent workspace
 
-也可以直接将 Los Alamos 工作区作为项目交给 Codex、Claude Code、TRAE 或其他 Coding Agent。Agent 读取同一份事实、任务模型、事件和驻留记录，并可通过文件协议打开原生应用的指定页面。
-
-打开工作区后，唯一入口是：
+同一工作区可以直接交给 Codex、Claude Code、TRAE 或其他 Coding Agent。唯一入口是：
 
 ```bash
 ./.los/los agent context --json
 ```
 
-命令会返回当前阶段、缺失输入和唯一下一步。完整能力可通过以下命令发现：
+能力发现：
 
 ```bash
 ./.los/los agent capabilities --json
 ```
 
-Windows 使用 `.los\los.cmd`。启动器不依赖 npm；缺少系统 Node 时会复用 Los Alamos 自身的 Electron Runtime。
-macOS 与 Linux 使用 `.los/los`。源码工作区还会自动发现系统中已安装的
-`Los Alamos.app` 或 `los-alamos`。
+Windows 使用 `.los\los.cmd`。启动器不依赖 npm；缺少系统 Node 时会复用
+Los Alamos 桌面 Runtime。Agent 与 GUI 共享事实、任务模型、事件和会话记录，
+但开始、恢复、完成和项目终态仍需用户明确确认。
 
-两条路径共享同一个 workspace，可以随时切换，不需要导入、导出或同步。
-
-## 公共协议
+## 公共数据协议
 
 ```text
 Los Alamos/
   README.md
   AGENTS.md
-  CLAUDE.md
   .los/
   .trae/skills/los-alamos-residency/SKILL.md
   skills/los-alamos-residency/SKILL.md
@@ -65,43 +115,52 @@ Los Alamos/
   projects/<project-id>/model.json
   projects/<project-id>/events.jsonl
   sessions/<session-id>.json
+  plans/<plan-id>.json
+  plans/events.jsonl
+  inbox/<capture-id>.json
+  inbox/events.jsonl
 ```
 
-Agent 必须先读取 `AGENTS.md`，优先通过 `./.los/los` 操作；只有 CLI 无法表达合理的任务图变更时，才直接编辑结构化文件。
+`brief.md` 保存用户提供的事实；模型、交接、会话和计划遵守 JSON Schema。
+事件日志只追加，不重写。结构化字段保留 `schemaVersion`、`revision`、
+`updatedAt` 和 `updatedBy`，旧数据通过可选字段兼容。
 
-## 开发
+## 架构
 
-要求 Node.js `20.19.0` 或更高版本。
-
-```bash
-npm install
-npm run dev
-npm test
-npm run build
-npm run pack
-npm run dist
+```text
+apps/desktop/        Electron 主进程、preload 与 React 界面
+packages/core/       任务图、调度、进度和会话纯逻辑
+packages/workspace/  本地持久化、校验、锁与协议同步
+packages/cli/        CLI 与 Agent 状态机
+packages/llm/        OpenAI-compatible 模型适配
+schemas/             公共 JSON 合约
+skills/              Agent 工作流协议
 ```
 
-`pack` 生成当前平台的未封装目录，`dist` 生成当前平台的安装包。也可以显式运行：
+Electron 渲染器启用 `sandbox` 与 `contextIsolation`。公开写操作通过跨进程工作区锁
+串行化，单文件写入使用临时文件替换；这不被表述为数据库级多文件事务。
 
-```bash
-npm run dist:mac
-npm run dist:win
-npm run dist:linux
-```
+## 验证
 
-发行目标：
+`v0.2.0` 包含 79 项核心、工作区、CLI 与模型适配测试。真实 Electron 验收覆盖
+`1180×760` 和最小窗口 `980×640`，包括：
 
-- macOS：DMG、ZIP；
-- Windows：NSIS Setup、portable EXE；
-- Linux：AppImage、Debian `.deb`。
+- 收纳、准备、一键开始、分心捕获和草稿恢复；
+- 暂停/恢复、两项交接、精确重入与显式收尾；
+- 任务图、计划生命周期、Agent Runtime 与 GUI 指令；
+- 长文本布局、弹层焦点、并发开始和过期预览 token。
 
-各平台构建应在对应原生系统中执行。GitHub Actions 会在 macOS、Windows 和 Ubuntu
-runner 上完成冷安装，并验证应用启动、preload/IPC、系统安全存储、Agent Runtime
-与 GUI 页面控制。产物统一写入 `release/`。
+详细证据与复现步骤：
 
-macOS 正式发行使用 universal 构建、Developer ID 签名、Apple 公证和 stapled
-DMG。凭据准备、GitHub Secrets 与发行操作见
-[`docs/macos-signing.md`](docs/macos-signing.md)。
+- [此刻工作台验收方案](docs/launcher-acceptance.md)
+- [连续驻留验收方案](docs/continuity-acceptance.md)
+- [安全策略](SECURITY.md)
+- [更新日志](CHANGELOG.md)
 
-源码仓库不会提交本地 `workspace/` 数据或 `release/` 构建产物。打包应用的正式数据默认位于系统“文稿/Documents”目录下的 `Los Alamos/`。
+## 隐私与边界
+
+Los Alamos 默认不上传项目数据，不扫描材料内容，不监视桌面，不强制屏蔽软件，
+也不会未经确认执行文件或替用户完成项目。配置外部模型时，只有相应分析请求会发送到
+用户指定的 API 服务。
+
+源码仓库不会提交本地 `workspace/`、`artifacts/`、`release/`、API 密钥或个人项目数据。

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://los-alamos.local/schemas/capture.schema.json",
+  "title": "Los Alamos AttentionCapture",
+  "type": "object",
+  "required": ["schemaVersion", "id", "text", "status", "createdAt", "updatedAt", "updatedBy", "revision"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 12000 },
+    "status": { "enum": ["inbox", "shelved", "converted"] },
+    "sourceSessionId": { "type": "string" },
+    "projectId": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "updatedBy": { "enum": ["user", "app", "agent"] },
+    "revision": { "type": "integer", "minimum": 1 }
+  }
+}

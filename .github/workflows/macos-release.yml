@@ -45,6 +45,7 @@ jobs:
             "$RUNNER_TEMP/los-alamos-notarization" >>"$GITHUB_ENV"
 
       - name: Validate release inputs
+        id: release-inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -60,8 +61,10 @@ jobs:
             fi
           done
           if [ "${#missing[@]}" -ne 0 ]; then
-            printf 'Missing required GitHub Secrets: %s\n' "${missing[*]}" >&2
-            exit 1
+            printf 'ready=false\n' >>"$GITHUB_OUTPUT"
+            printf 'Signed macOS release skipped; missing GitHub Secrets: %s\n' \
+              "${missing[*]}" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
@@ -72,13 +75,16 @@ jobs:
               exit 1
             fi
           fi
+          printf 'ready=true\n' >>"$GITHUB_OUTPUT"
 
       - name: Install dependencies
+        if: steps.release-inputs.outputs.ready == 'true'
         run: |
           npm ci
           python -m pip install --disable-pip-version-check -r requirements-smoke.txt
 
       - name: Prepare signing credentials
+        if: steps.release-inputs.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -96,20 +102,25 @@ jobs:
           printf 'APPLE_API_KEY=%s\n' "$api_key" >>"$GITHUB_ENV"
 
       - name: Test
+        if: steps.release-inputs.outputs.ready == 'true'
         run: npm test
 
       - name: Build, sign, and notarize universal app
+        if: steps.release-inputs.outputs.ready == 'true'
         run: npm run dist:mac:signed
         env:
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
       - name: Notarize and staple DMG
+        if: steps.release-inputs.outputs.ready == 'true'
         run: bash scripts/notarize_macos_dmg.sh release/macos-signed
 
       - name: Verify signatures, tickets, and Gatekeeper
+        if: steps.release-inputs.outputs.ready == 'true'
         run: bash scripts/verify_macos_release.sh release/macos-signed
 
       - name: Install DMG for smoke test
+        if: steps.release-inputs.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -137,9 +148,11 @@ jobs:
           printf 'LOS_ALAMOS_PACKAGED_EXECUTABLE=%s\n' "$executable" >>"$GITHUB_ENV"
 
       - name: Run signed package smoke test
+        if: steps.release-inputs.outputs.ready == 'true'
         run: python scripts/packaged_smoke.py
 
       - name: Generate checksums
+        if: steps.release-inputs.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -147,6 +160,7 @@ jobs:
           shasum -a 256 -- *.dmg *.zip >SHA256SUMS.txt
 
       - name: Upload signed release evidence
+        if: steps.release-inputs.outputs.ready == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: los-alamos-macos-signed-${{ github.run_number }}
@@ -160,7 +174,7 @@ jobs:
             ${{ runner.temp }}/los-alamos-smoke/*.log
 
       - name: Publish tag release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.release-inputs.outputs.ready == 'true' && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -182,7 +196,7 @@ jobs:
           fi
 
       - name: Remove signing credentials
-        if: always()
+        if: always() && steps.release-inputs.outputs.ready == 'true'
         shell: bash
         run: |
           rm -f \

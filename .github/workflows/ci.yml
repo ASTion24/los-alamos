@@ -149,6 +149,22 @@ jobs:
         if: matrix.platform == 'linux'
         run: dbus-run-session -- sh scripts/linux_packaged_smoke.sh
 
+      - name: Run continuity acceptance on the native package
+        if: matrix.platform != 'linux'
+        run: python scripts/continuity_smoke.py
+
+      - name: Run continuity acceptance on Linux
+        if: matrix.platform == 'linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum python scripts/continuity_smoke.py
+
+      - name: Run attention launcher acceptance
+        if: matrix.platform != 'linux'
+        run: python scripts/launcher_smoke.py
+
+      - name: Run attention launcher acceptance on Linux
+        if: matrix.platform == 'linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum python scripts/launcher_smoke.py
+
       - name: Run Windows portable smoke test
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -178,3 +194,7 @@ jobs:
             release/*.deb
             ${{ runner.temp }}/los-alamos-smoke/*.png
             ${{ runner.temp }}/los-alamos-smoke/*.log
+            artifacts/continuity/*.png
+            artifacts/continuity/*.log
+            artifacts/launcher/*.png
+            artifacts/launcher/*.log

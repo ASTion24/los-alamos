@@ -1,5 +1,6 @@
 import type { Intensity, LongTailProject, ResidencySession, WorkUnit } from "./types";
 import { SCHEMA_VERSION } from "./types";
+import { projectCapsule, projectIsAvailable } from "./context";
 
 const intensityScore: Record<Intensity, number> = {
   low: 1,
@@ -14,6 +15,7 @@ export interface SessionProposalInput {
   intensity: Intensity;
   now: string;
   makeId: () => string;
+  projectId?: string;
 }
 
 export interface SessionProposal {
@@ -34,10 +36,14 @@ export function isDependencyOpen(task: WorkUnit, allTasks: WorkUnit[]): boolean 
 }
 
 export function proposeSessionTask(input: SessionProposalInput): SessionProposal | null {
-  const budget = Math.max(5, input.minutes);
+  if (!Number.isFinite(input.minutes) || input.minutes < 5 || input.minutes > 180 ||
+      !Object.hasOwn(intensityScore, input.intensity)) {
+    throw new Error("驻留约束无效。时间为 5-180 分钟，强度必须是有效枚举。");
+  }
+  const budget = input.minutes;
 
   const candidates = input.projects.flatMap((project) =>
-    project.archivedAt
+    !projectIsAvailable(project) || project.modelNeedsReview || (input.projectId && project.id !== input.projectId)
       ? []
       : project.taskGraph.tasks
           .filter(
@@ -58,18 +64,22 @@ export function proposeSessionTask(input: SessionProposalInput): SessionProposal
       const timeFit = Math.abs(task.effortMinutes - budget);
       const nearCloseBonus = project.completionPercent >= 70 ? 20 : 0;
       const statusBonus = task.status === "in_progress" ? 10 : 0;
-      const weightBonus = task.weight;
+      const totalWeight = project.taskGraph.tasks.reduce((sum, item) => sum + Math.max(0, item.weight), 0);
+      const weightBonus = totalWeight ? 30 * task.weight / totalWeight : 0;
+      const continuityBonus = project.capsule?.taskId === task.id ? 15 : 0;
       return {
         project,
         task,
-        score: weightBonus + nearCloseBonus + statusBonus - timeFit
+        score: weightBonus + nearCloseBonus + statusBonus + continuityBonus - timeFit
       };
     })
     .sort((left, right) => right.score - left.score);
 
   const best = scored[0];
-  const isCheckpoint = best.task.effortMinutes > budget * 1.4;
+  const isCheckpoint = best.task.effortMinutes > budget;
   const task = isCheckpoint ? shrinkTask(best.task, budget) : best.task;
+  const capsule = projectCapsule(best.project);
+  const resume = capsule.taskId === task.id;
 
   const session: ResidencySession = {
     schemaVersion: SCHEMA_VERSION,
@@ -84,9 +94,9 @@ export function proposeSessionTask(input: SessionProposalInput): SessionProposal
     status: "proposed",
     startedAt: input.now,
     prompt: `本次驻留只处理：${task.title}。`,
-    startAction: task.startAction,
+    startAction: resume && capsule.nextAction ? capsule.nextAction : task.startAction,
     completionCriteria: task.completionCriteria,
-    notDoing: task.notDoing,
+    notDoing: [...new Set([task.notDoing, ...(resume && capsule.notDoing ? [capsule.notDoing] : [])])].join("\n"),
     selectionReason: makeSelectionReason(
       best.project,
       best.task,
@@ -95,7 +105,9 @@ export function proposeSessionTask(input: SessionProposalInput): SessionProposal
     ),
     updatedAt: input.now,
     updatedBy: "app",
-    revision: 1
+    revision: 1,
+    capsule,
+    elapsedSeconds: 0
   };
 
   return {

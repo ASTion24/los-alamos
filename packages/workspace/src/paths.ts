@@ -6,6 +6,8 @@ export interface WorkspacePaths {
   manifest: string;
   projects: string;
   sessions: string;
+  plans: string;
+  inbox: string;
   schemas: string;
   runtime: string;
   openRequest: string;
@@ -38,6 +40,8 @@ export function getWorkspacePaths(explicitRoot?: string): WorkspacePaths {
     manifest: join(root, "residency.json"),
     projects: join(root, "projects"),
     sessions: join(root, "sessions"),
+    plans: join(root, "plans"),
+    inbox: join(root, "inbox"),
     schemas: join(root, "schemas"),
     runtime,
     openRequest: join(runtime, "open-request.json")

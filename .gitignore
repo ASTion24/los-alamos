@@ -4,6 +4,7 @@ out/
 dist/
 /release/
 /workspace/
+/artifacts/
 .vite/
 .vitest/
 coverage/

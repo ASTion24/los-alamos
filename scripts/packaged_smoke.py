@@ -172,7 +172,7 @@ def run_smoke(
         )
         page.reload()
         page.wait_for_load_state("domcontentloaded")
-        page.get_by_text("Los Alamos", exact=True).wait_for()
+        page.locator(".wordmark").wait_for()
 
         assert page.title() == "Los Alamos"
         assert page.evaluate("typeof window.los") == "object"
@@ -194,17 +194,23 @@ def run_smoke(
         page.screenshot(path=ABOUT_SHOT, full_page=True)
         page.get_by_role("button", name="进入 Los Alamos", exact=True).click()
         page.locator(".about-plane").wait_for(state="detached")
+        # wait_for_function treats an async predicate's Promise as truthy.
+        deadline = time.monotonic() + 5
+        while page.evaluate("window.los.getAboutState()")["shouldShow"]:
+            if time.monotonic() >= deadline:
+                raise AssertionError("About dismissal was not persisted.")
+            page.wait_for_timeout(50)
         assert page.evaluate("window.los.getAboutState()")["shouldShow"] is False
         page.reload()
         page.wait_for_load_state("domcontentloaded")
-        page.get_by_text("Los Alamos", exact=True).wait_for()
+        page.locator(".wordmark").wait_for()
         assert page.locator(".about-plane").count() == 0
 
         health = page.evaluate("window.los.getWorkspaceHealth()")
         assert "issues" in health
         assert "projectCount" in health
         assert page.locator(".atelier").is_visible()
-        assert page.locator(".projects-overview-plane").is_visible()
+        assert page.locator(".launcher").is_visible()
         assert page.locator(".workspace-count").count() == 0
         actual_workspace = Path(page.evaluate("window.los.workspaceRoot()"))
         assert actual_workspace.resolve() == workspace_root.resolve()
@@ -216,8 +222,8 @@ def run_smoke(
         if projects:
             request_open(actual_workspace, "project", projects[0]["id"])
             page.locator(".project-detail").wait_for()
-            assert page.get_by_text("下一入口", exact=True).is_visible()
-            assert page.get_by_text("最近推进", exact=True).is_visible()
+            assert page.get_by_text("下一动作", exact=True).is_visible()
+            assert page.get_by_role("button", name="交接", exact=True).is_visible()
             assert page.get_by_label("更新项目事实").is_visible()
             assert page.locator(".project-title-metrics").count() == 0
         request_open(actual_workspace, "create")
@@ -262,6 +268,8 @@ def run_smoke(
         page.locator(".about-plane").wait_for(state="detached")
         request_open(actual_workspace, "history")
         page.locator(".history-plane").wait_for()
+        request_open(actual_workspace, "plans")
+        page.locator(".plans-plane").wait_for()
         request_open(actual_workspace, "residency")
         page.locator(".work-plane").wait_for()
         if page.locator(".residency-proposal").count() > 0:

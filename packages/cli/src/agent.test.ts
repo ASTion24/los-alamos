@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { LongTailProject, ResidencySession } from "../../core/src";
+import type { LongTailProject, ResidencySession, ResidencyPlan } from "../../core/src";
+import { analyzeProjectFast, localDate } from "../../core/src";
 import { buildAgentContext } from "./agent";
 
 const project = {
@@ -18,6 +19,35 @@ const health = {
 };
 
 describe("agent context", () => {
+  it("waits for explicit user confirmation before resuming paused work", () => {
+    const context = buildAgentContext({ workspaceRoot: "/tmp/los", health, projects: [project],
+      sessions: [{ id: "paused", taskTitle: "Review", status: "paused" } as ResidencySession] });
+    expect(context.phase).toBe("residency_paused");
+    expect(context.nextActions[1]).toMatchObject({ requiresUserConfirmation: true, command: "./.los/los session resume paused --json" });
+  });
+  it("prioritizes reviewing an existing proposal over its reserved daily capacity", () => {
+    const plan = { id: "plan", status: "active", dailyMinutes: 25, startDate: localDate(), endDate: localDate(), intensity: "medium" } as ResidencyPlan;
+    const session = { id: "session", status: "proposed", planId: "plan", workDate: localDate(), minutesPlanned: 25, elapsedSeconds: 0 } as ResidencySession;
+    const context = buildAgentContext({ workspaceRoot: "/tmp/los", health, projects: [project], plans: [plan], sessions: [session] });
+    expect(context.phase).toBe("review_proposal");
+  });
+  it("does not suggest work above plan capacity", () => {
+    const plan = { id: "plan", status: "active", dailyMinutes: 15, startDate: localDate(), endDate: localDate(), intensity: "medium" } as ResidencyPlan;
+    const context = buildAgentContext({ workspaceRoot: "/tmp/los", health, projects: [project], plans: [plan], sessions: [], minutes: 25, intensity: "medium" });
+    expect(context.phase).toBe("plan_attention");
+  });
+  it("preserves the explicit project filter in the proposal command", () => {
+    const context = buildAgentContext({ workspaceRoot: "/tmp/los", health, projects: [project], sessions: [], minutes: 25, intensity: "medium", projectId: "paper" });
+    expect(context.nextActions[0].command).toContain("--project paper");
+  });
+  it("stops proposing when all tasks are done", () => {
+    const model = analyzeProjectFast({ id: "paper", title: "Paper", brief: "Draft", now: new Date().toISOString(), intake: {
+      completed: "Draft", remaining: "Submit", closeCriteria: "Receipt"
+    } });
+    model.taskGraph.tasks[0].status = "done";
+    const context = buildAgentContext({ workspaceRoot: "/tmp/los", health, projects: [model], sessions: [], minutes: 25, intensity: "medium" });
+    expect(context.phase).toBe("no_eligible_task");
+  });
   it("asks for a project when no active project exists", () => {
     const context = buildAgentContext({
       workspaceRoot: "/tmp/los-alamos",

@@ -1,8 +1,11 @@
 import type {
   Intensity,
   LongTailProject,
-  ResidencySession
+  ResidencySession,
+  ResidencyPlan,
+  AttentionCapture
 } from "../../core/src";
+import { projectIsAvailable, localDate, planMinutesUsed, proposeSessionTask } from "../../core/src";
 import type { WorkspaceHealth } from "../../workspace/src";
 
 const agentCommand = "./.los/los";
@@ -27,10 +30,28 @@ export const agentCapabilities = {
     projectModel: "<workspace-root>/projects/<project-id>/model.json",
     projectEvents: "<workspace-root>/projects/<project-id>/events.jsonl",
     sessions: "<workspace-root>/sessions/<session-id>.json",
+    captures: "<workspace-root>/inbox/<capture-id>.json",
     schemas: "<workspace-root>/schemas/*.schema.json",
     contextSchema: "<workspace-root>/schemas/agent-context.schema.json"
   },
   commands: [
+    { operation: "inbox.list", command: `${agentCommand} inbox list --json`, gui: "收纳箱" },
+    { operation: "inbox.add", command: `${agentCommand} inbox add --text <verbatim-thought> [--session <id>] --json`, gui: "先收下来" },
+    { operation: "inbox.shelve", command: `${agentCommand} inbox shelve <id> --json` },
+    { operation: "inbox.restore", command: `${agentCommand} inbox restore <id> --json` },
+    { operation: "inbox.prepare", command: `${agentCommand} inbox prepare <id> --title <title> --remaining <actions> --closing <criterion> --json` },
+    { operation: "focus.preview", command: `${agentCommand} focus preview --minutes <n> --intensity <level> [--project <id>] --json`, gui: "此刻" },
+    { operation: "focus.start", command: `${agentCommand} focus start --minutes <n> --intensity <level> --token <preview-token> [--project <id>] --json`, gui: "确认开始" },
+    { operation: "project.capsule", command: `${agentCommand} project capsule <id> --file <capsule.json> --json`, gui: "编辑交接" },
+    { operation: "project.resolve", command: `${agentCommand} project resolve <id> --outcome <active|closed|parked|waiting|killed> --note <reason> [--evidence <text>] [--revisit <YYYY-MM-DD>] --json`, gui: "收尾决定" },
+    { operation: "plan.list", command: `${agentCommand} plan list --json`, gui: "驻留计划" },
+    { operation: "plan.save", command: `${agentCommand} plan save --file <plan.json> [--id <id>] --json` },
+    { operation: "plan.commit", command: `${agentCommand} plan commit <id> --json` },
+    { operation: "plan.start", command: `${agentCommand} plan start <id> --json` },
+    { operation: "plan.close", command: `${agentCommand} plan close <id> --note <result> --json` },
+    { operation: "session.pause", command: `${agentCommand} session pause <id> --json`, gui: "暂停" },
+    { operation: "session.resume", command: `${agentCommand} session resume <id> --json`, gui: "继续驻留" },
+    { operation: "session.revise", command: `${agentCommand} session revise <id> --start <action> --completion <criterion> --not-doing <boundary> --json` },
     {
       operation: "agent.context",
       command: `${agentCommand} agent context [--minutes <5-180>] [--intensity <low|medium|high|xhigh>] --json`
@@ -41,7 +62,7 @@ export const agentCapabilities = {
     },
     {
       operation: "project.create",
-      command: `${agentCommand} project add --title <title> --brief <facts> --json`,
+      command: `${agentCommand} project add --title <title> --brief <facts> [--intake-file <json>] --json`,
       gui: "新增项目"
     },
     {
@@ -82,7 +103,7 @@ export const agentCapabilities = {
     },
     {
       operation: "session.propose",
-      command: `${agentCommand} session propose --minutes <5-180> --intensity <level> --json`,
+      command: `${agentCommand} session propose --minutes <5-180> --intensity <level> [--project <id>] --json`,
       gui: "生成驻留提案"
     },
     {
@@ -98,7 +119,7 @@ export const agentCapabilities = {
     {
       operation: "session.close",
       command:
-        `${agentCommand} session close <session-id> --result <completed|partial|not_completed> [--note <feedback>] --json`,
+        `${agentCommand} session close <session-id> --result <completed|partial|not_completed> [--note <feedback>] [--handoff-file <capsule.json>] --json`,
       gui: "结束驻留"
     },
     {
@@ -109,7 +130,7 @@ export const agentCapabilities = {
     {
       operation: "gui.open",
       command:
-        `${agentCommand} open <projects|project|archive|create|residency|history|settings|about|session> [id] --json`
+        `${agentCommand} open <home|projects|project|archive|create|residency|history|settings|about|session|plans> [id] --json`
     }
   ]
 } as const;
@@ -121,6 +142,7 @@ type AgentPhase =
   | "ready_to_propose"
   | "review_proposal"
   | "residency_active";
+type AttentionPhase = "residency_paused" | "plan_attention" | "no_eligible_task";
 
 interface AgentContextInput {
   workspaceRoot: string;
@@ -129,6 +151,9 @@ interface AgentContextInput {
   sessions: ResidencySession[];
   minutes?: number;
   intensity?: Intensity;
+  projectId?: string;
+  plans?: ResidencyPlan[];
+  captures?: AttentionCapture[];
 }
 
 interface NextAction {
@@ -141,43 +166,53 @@ interface NextAction {
 
 export function buildAgentContext(input: AgentContextInput): {
   protocolVersion: "1";
-  phase: AgentPhase;
+  phase: AgentPhase | AttentionPhase;
   summary: string;
   workspace: {
     root: string;
     ok: boolean;
     issues: WorkspaceHealth["issues"];
+    plan?: ResidencyPlan;
+    inboxCount: number;
     projects: Array<{
       id: string;
       title: string;
       completionPercent: number;
       archived: boolean;
+      outcome?: string;
     }>;
   };
   session: ResidencySession | null;
-  constraints: { minutes?: number; intensity?: Intensity };
+  constraints: { minutes?: number; intensity?: Intensity; projectId?: string };
   nextActions: NextAction[];
 } {
   const projects = input.projects.map((project) => ({
     id: project.id,
     title: project.title,
     completionPercent: project.completionPercent,
-    archived: Boolean(project.archivedAt)
+    archived: Boolean(project.archivedAt),
+    outcome: project.resolution?.outcome
   }));
-  const activeProjects = input.projects.filter((project) => !project.archivedAt);
+  const activeProjects = input.projects.filter(projectIsAvailable);
+  const pausedSession = input.sessions.find((session) => session.status === "paused");
+  const plan = input.plans?.find((item) => item.status !== "closed");
+  const projectFlag = input.projectId ? ` --project ${input.projectId}` : "";
   const activeSession =
     input.sessions.find((session) => session.status === "active") ?? null;
   const proposedSession =
     input.sessions.find((session) => session.status === "proposed") ?? null;
   const constraints = {
     ...(input.minutes === undefined ? {} : { minutes: input.minutes }),
-    ...(input.intensity === undefined ? {} : { intensity: input.intensity })
+    ...(input.intensity === undefined ? {} : { intensity: input.intensity }),
+    ...(input.projectId ? { projectId: input.projectId } : {})
   };
   const workspace = {
     root: input.workspaceRoot,
     ok: input.health.ok,
     issues: input.health.issues,
-    projects
+    projects,
+    plan,
+    inboxCount: input.captures?.filter((capture) => capture.status === "inbox").length ?? 0
   };
 
   if (!input.health.ok) {
@@ -224,6 +259,28 @@ export function buildAgentContext(input: AgentContextInput): {
     };
   }
 
+  if (pausedSession) {
+    return {
+      protocolVersion: "1", phase: "residency_paused", summary: `驻留已暂停：${pausedSession.taskTitle}`,
+      workspace, session: pausedSession, constraints,
+      nextActions: [
+        { id: "review-pause", type: "ask_user", instruction: "展示暂停原因与已确认用时，询问继续或记录结果；不得自动继续。", requiresUserConfirmation: true },
+        { id: "resume", type: "run_command", instruction: "仅在用户确认后继续计时。",
+          command: `${agentCommand} session resume ${pausedSession.id} --json`, requiresUserConfirmation: true }
+      ]
+    };
+  }
+  if (!proposedSession && plan?.status === "active" && (localDate() > plan.endDate || localDate() < plan.startDate ||
+    planMinutesUsed(plan, input.sessions) + (input.minutes ?? 0) > plan.dailyMinutes ||
+    planMinutesUsed(plan, input.sessions) >= plan.dailyMinutes ||
+    (input.intensity && ["low", "medium", "high", "xhigh"].indexOf(input.intensity) > ["low", "medium", "high", "xhigh"].indexOf(plan.intensity)))) {
+    return {
+      protocolVersion: "1", phase: "plan_attention", summary: "驻留日期或今日容量已达到边界。",
+      workspace, session: null, constraints,
+      nextActions: [{ id: "review-plan", type: "ask_user", requiresUserConfirmation: true,
+        instruction: `当前计划 ${plan.id}：请休息、等待下一窗口或在用户确认后通过 plan close 留下结束说明。不得自动加量。` }]
+    };
+  }
   if (proposedSession) {
     return {
       protocolVersion: "1",
@@ -271,7 +328,9 @@ export function buildAgentContext(input: AgentContextInput): {
           id: "ask-project",
           type: "ask_user",
           instruction:
-            "询问一个项目名称和当前事实：已有材料、剩余工作、阻塞点、理想关闭标准。不要补写用户未提供的事实。",
+            workspace.inboxCount
+              ? "收纳箱已有原始事项。先通过 inbox list 读取，向用户确认一件事的剩余动作和结束标准，再用 inbox prepare 建立项目。不要自动把所有事项变成待办。"
+              : "询问一件挂念的事，可先通过 inbox add 保存原话，不要求立刻建模。准备推进时再确认剩余动作和结束标准。",
           requiresUserConfirmation: true
         },
         {
@@ -307,13 +366,25 @@ export function buildAgentContext(input: AgentContextInput): {
           type: "run_command",
           instruction: "取得约束后重新读取上下文。",
           command:
-            `${agentCommand} agent context --minutes <5-180> --intensity <low|medium|high|xhigh> --json`,
+            `${agentCommand} agent context --minutes <5-180> --intensity <low|medium|high|xhigh>${projectFlag} --json`,
           requiresUserConfirmation: true
         }
       ]
     };
   }
 
+  const pool = activeProjects.filter((project) => plan?.status !== "active" || plan.projectIds.includes(project.id));
+  if (pool.every((project) => project.taskGraph) && !proposeSessionTask({
+    projects: pool, minutes: input.minutes, intensity: input.intensity,
+    projectId: input.projectId, now: new Date().toISOString(), makeId: () => "preview"
+  })) {
+    return {
+      protocolVersion: "1", phase: "no_eligible_task", summary: "当前没有符合边界的未阻塞任务。",
+      workspace, session: null, constraints,
+      nextActions: [{ id: "inspect-blockers", type: "ask_user", requiresUserConfirmation: true,
+        instruction: "检查项目关闭标准、任务依赖与强度。所有任务结束时请确认项目收尾决定，不要循环生成相同提案，也不要擅自提高强度。" }]
+    };
+  }
   return {
     protocolVersion: "1",
     phase: "ready_to_propose",
@@ -326,7 +397,7 @@ export function buildAgentContext(input: AgentContextInput): {
         id: "propose",
         type: "run_command",
         instruction: "生成可审阅提案；这一步不会开始计时。",
-        command: `${agentCommand} session propose --minutes ${input.minutes} --intensity ${input.intensity} --json`
+        command: `${agentCommand} session propose --minutes ${input.minutes} --intensity ${input.intensity}${projectFlag} --json`
       },
       {
         id: "refresh-after-proposal",

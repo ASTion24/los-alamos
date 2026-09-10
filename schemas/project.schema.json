@@ -80,6 +80,29 @@
     "updatedAt": { "type": "string" },
     "updatedBy": { "enum": ["user", "app", "agent", "llm"] },
     "revision": { "type": "number", "minimum": 1 },
-    "archivedAt": { "type": "string" }
+    "archivedAt": { "type": "string" },
+    "capsule": { "$ref": "capsule.schema.json" },
+    "modelNeedsReview": { "type": "boolean" },
+    "intake": {
+      "type": "object",
+      "required": ["completed", "remaining", "closeCriteria"],
+      "properties": {
+        "completed": { "type": "string" },
+        "remaining": { "type": "string" },
+        "closeCriteria": { "type": "string" },
+        "progressEstimate": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "required": ["outcome", "note", "evidence", "decidedAt"],
+      "properties": {
+        "outcome": { "enum": ["closed", "parked", "waiting", "killed"] },
+        "note": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string" },
+        "revisitAt": { "type": "string", "format": "date" },
+        "decidedAt": { "type": "string", "format": "date-time" }
+      }
+    }
   }
 }

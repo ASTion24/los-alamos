@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   cancelSessionProposal,
@@ -17,9 +17,12 @@ import {
   setProjectArchived,
   startWorkspaceSession,
   updateProjectBrief,
-  updateProjectTask
+  updateProjectTask,
+  updateProjectCapsule, resolveProject, listPlans, savePlan, transitionPlan,
+  pauseWorkspaceSession, resumeWorkspaceSession, reviseProposal, assertSafeId,
+  listCaptures, captureThought, setCaptureShelved, convertCapture, previewFocus, startFocus
 } from "../../workspace/src";
-import type { Intensity, SessionResult, TaskStatus, WorkUnit } from "../../core/src";
+import type { Intensity, SessionResult, TaskStatus, WorkUnit, ContextCapsule, PlanDraft, ProjectIntake, ProjectOutcome } from "../../core/src";
 import { agentCapabilities, buildAgentContext } from "./agent";
 
 interface ParsedArgs {
@@ -48,10 +51,14 @@ async function main(): Promise<void> {
       minutesFlag === undefined ? undefined : parseNumber(minutesFlag, "minutes", 5, 180);
     const intensity =
       intensityFlag === undefined ? undefined : parseIntensity(intensityFlag);
-    const [health, projects, sessions] = await Promise.all([
+    const projectId = readFlag(args, "project", false);
+    if (projectId) await readProject(assertSafeId(projectId));
+    const [health, projects, sessions, plans, captures] = await Promise.all([
       inspectWorkspace(),
       listProjects(),
-      listSessions()
+      listSessions(),
+      listPlans(),
+      listCaptures()
     ]);
     print(
       buildAgentContext({
@@ -60,17 +67,37 @@ async function main(): Promise<void> {
         projects,
         sessions,
         minutes,
-        intensity
+        intensity,
+        projectId, plans, captures
       }),
       args
     );
     return;
   }
 
+  if (area === "inbox") {
+    if (command === "list") print(await listCaptures(), args);
+    else if (command === "add") print(await captureThought({ text: readFlag(args, "text", true), sourceSessionId: readFlag(args, "session", false) }), args);
+    else if ((command === "shelve" || command === "restore") && maybeId) print(await setCaptureShelved({ id: maybeId, shelved: command === "shelve" }), args);
+    else if (command === "prepare" && maybeId) print(await convertCapture({
+      id: maybeId, title: readFlag(args, "title", true), remaining: readFlag(args, "remaining", true), closeCriteria: readFlag(args, "closing", true)
+    }), args);
+    else throw new Error("Usage: inbox list | add --text <text> | shelve/restore <id> | prepare <id> --title <title> --remaining <actions> --closing <criterion>");
+    return;
+  }
+  if (area === "focus") {
+    const constraints = { minutes: parseNumber(readFlag(args, "minutes", true), "minutes", 5, 180),
+      intensity: parseIntensity(readFlag(args, "intensity", true)), projectId: readFlag(args, "project", false) };
+    if (command === "preview") print(await previewFocus(constraints), args);
+    else if (command === "start") print(await startFocus({ ...constraints, token: readFlag(args, "token", true) }), args);
+    else throw new Error("Usage: focus preview/start --minutes <n> --intensity <level> [--project <id>] [--token <preview-token>]");
+    return;
+  }
+
   if (area === "project" && command === "add") {
     const title = readFlag(args, "title", true);
     const brief = readFlag(args, "brief", true);
-    const project = await createProject({ title, brief });
+    const project = await createProject({ title, brief, intake: readJsonFlag<ProjectIntake>(args, "intake-file") });
     print(project, args);
     return;
   }
@@ -93,7 +120,7 @@ async function main(): Promise<void> {
       throw new Error("Missing project id.");
     }
     const brief = readFlag(args, "brief", true);
-    print(await updateProjectBrief({ projectId: maybeId, brief }), args);
+    print(await updateProjectBrief({ projectId: maybeId, brief, intake: readJsonFlag<ProjectIntake>(args, "intake-file") }), args);
     return;
   }
 
@@ -167,10 +194,57 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (area === "project" && command === "capsule") {
+    if (!maybeId) throw new Error("Missing project id.");
+    const capsule = readJsonFlag<ContextCapsule>(args, "file");
+    if (!capsule) throw new Error("Missing --file.");
+    print(await updateProjectCapsule({ projectId: maybeId, capsule }), args);
+    return;
+  }
+  if (area === "project" && command === "resolve") {
+    if (!maybeId) throw new Error("Missing project id.");
+    print(await resolveProject({
+      projectId: maybeId, outcome: readFlag(args, "outcome", true) as ProjectOutcome | "active",
+      note: readFlag(args, "note", true), evidence: readFlag(args, "evidence", false),
+      revisitAt: readFlag(args, "revisit", false)
+    }), args);
+    return;
+  }
+  if (area === "plan") {
+    if (command === "list") { print(await listPlans(), args); return; }
+    if (command === "save") {
+      const draft = readJsonFlag<PlanDraft>(args, "file");
+      if (!draft) throw new Error("Missing --file.");
+      print(await savePlan({ id: readFlag(args, "id", false), draft }), args);
+      return;
+    }
+    if (["commit", "start", "close"].includes(command) && maybeId) {
+      print(await transitionPlan({
+        id: maybeId, status: command === "commit" ? "committed" : command === "start" ? "active" : "closed",
+        note: readFlag(args, "note", false)
+      }), args);
+      return;
+    }
+    throw new Error("Usage: plan list | save --file <json> [--id <id>] | commit/start/close <id>");
+  }
+  if (area === "session" && ["pause", "resume"].includes(command)) {
+    if (!maybeId) throw new Error("Missing session id.");
+    print(await (command === "pause" ? pauseWorkspaceSession(maybeId) : resumeWorkspaceSession(maybeId)), args);
+    return;
+  }
+  if (area === "session" && command === "revise") {
+    if (!maybeId) throw new Error("Missing session id.");
+    print(await reviseProposal({
+      id: maybeId, startAction: readFlag(args, "start", true),
+      completionCriteria: readFlag(args, "completion", true), notDoing: readFlag(args, "not-doing", true)
+    }), args);
+    return;
+  }
+
   if (area === "session" && command === "propose") {
     const minutes = parseNumber(readFlag(args, "minutes", true), "minutes", 5, 180);
     const intensity = parseIntensity(readFlag(args, "intensity", true));
-    const session = await proposeSession(minutes, intensity);
+    const session = await proposeSession(minutes, intensity, undefined, readFlag(args, "project", false));
     print(session ?? { error: "No eligible task found." }, args);
     return;
   }
@@ -202,7 +276,8 @@ async function main(): Promise<void> {
     }
     const result = parseSessionResult(readFlag(args, "result", true));
     const note = readFlag(args, "note", false);
-    print(await closeWorkspaceSession({ sessionId: maybeId, result, note }), args);
+    print(await closeWorkspaceSession({ sessionId: maybeId, result, note,
+      handoff: readJsonFlag<ContextCapsule>(args, "handoff-file") }), args);
     return;
   }
 
@@ -222,7 +297,9 @@ async function main(): Promise<void> {
       "history",
       "settings",
       "about",
-      "session"
+      "session",
+      "plans",
+      "home"
     ]);
     if (!allowedTargets.has(target)) {
       throw new Error(
@@ -330,6 +407,11 @@ function readFlag(args: ParsedArgs, name: string, required: boolean): string | u
   return undefined;
 }
 
+function readJsonFlag<T>(args: ParsedArgs, name: string): T | undefined {
+  const path = readFlag(args, name, false);
+  return path ? JSON.parse(readFileSync(path, "utf8")) as T : undefined;
+}
+
 function parseNumber(value: string, name: string, minimum: number, maximum = Number.POSITIVE_INFINITY): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
@@ -371,6 +453,7 @@ function print(value: unknown, args: ParsedArgs): void {
 }
 
 function printHelp(): void {
+  writeOutput(`${JSON.stringify(agentCapabilities, null, 2)}\n`, process.stdout);
   writeOutput(`Los Alamos CLI
 
 Usage:

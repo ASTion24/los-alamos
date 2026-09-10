@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   cancelSessionProposal,
   closeWorkspaceSession,
-  createProject,
+  createProject as createStoredProject,
+  type CreateProjectInput,
   inspectWorkspace,
   proposeSession,
   readProject,
@@ -18,6 +19,12 @@ import {
 import { projectBriefPath, projectModelPath } from "./paths";
 
 const roots: string[] = [];
+
+// Storage tests use explicit facts rather than depending on analyzer heuristics.
+const createProject = (input: CreateProjectInput) => createStoredProject({
+  ...input,
+  intake: { completed: "Draft exists.", remaining: "Review draft\nSubmit draft", closeCriteria: "Submission exists." }
+});
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -72,8 +79,8 @@ describe("workspace store", () => {
     });
 
     expect(updated.taskGraph.tasks.find((task) => task.id === "t1")?.status).toBe("in_progress");
-    expect(updated.completionPercent).toBe(6);
-    expect((await readProject(project.id, root)).completionPercent).toBe(6);
+    expect(updated.completionPercent).toBe(25);
+    expect((await readProject(project.id, root)).completionPercent).toBe(25);
   });
 
   it("rejects cyclic dependency edits", async () => {
@@ -83,12 +90,13 @@ describe("workspace store", () => {
       brief: "Draft exists. A final review and closure decision remain.",
       workspaceRoot: root
     });
+    await updateProjectTask({ projectId: project.id, taskId: "t2", patch: { dependsOn: ["t1"] }, workspaceRoot: root });
 
     await expect(
       updateProjectTask({
         projectId: project.id,
         taskId: "t1",
-        patch: { dependsOn: ["t4"] },
+        patch: { dependsOn: ["t2"] },
         workspaceRoot: root
       })
     ).rejects.toThrow("不能形成循环");
@@ -179,7 +187,7 @@ describe("workspace store", () => {
     expect(preserved?.status).toBe("done");
     expect(preserved?.progressPercent).toBe(100);
     expect(preserved?.notes).toBe("Closing line approved.");
-    expect(rebuilt.completionPercent).toBe(12);
+    expect(rebuilt.completionPercent).toBe(50);
   });
 
   it("rejects closing the same session twice", async () => {
@@ -305,6 +313,10 @@ describe("workspace store", () => {
       "utf8"
     );
     const readme = await readFile(join(root, "README.md"), "utf8");
+    const changelog = await readFile(join(root, "CHANGELOG.md"), "utf8");
+    const launcherImage = await readFile(
+      join(root, "docs", "assets", "attention-launcher.png")
+    );
     const traeSkill = await readFile(
       join(root, ".trae", "skills", "los-alamos-residency", "SKILL.md"),
       "utf8"
@@ -314,7 +326,9 @@ describe("workspace store", () => {
       "utf8"
     );
     expect(skill).toContain("./.los/los agent context --json");
-    expect(readme).toContain("# 关于 Los Alamos");
+    expect(readme).toContain("# Los Alamos");
+    expect(changelog).toContain("## [0.2.0]");
+    expect(launcherImage.subarray(1, 4).toString("ascii")).toBe("PNG");
     expect(traeSkill).toBe(skill);
     expect(agentSchema).toContain('"title": "Los Alamos AgentContext"');
   });

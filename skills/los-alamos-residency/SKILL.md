@@ -39,6 +39,9 @@ The context response contract is `<workspace.root>/schemas/agent-context.schema.
 | `ready_to_propose` | Run the exact proposal command returned by `nextActions`. |
 | `review_proposal` | Present the proposal. Start or cancel only after explicit user confirmation. |
 | `residency_active` | Open the session and wait while the user performs the work. Close only from user feedback. |
+| `residency_paused` | Show the pause reason and confirmed time. Resume or record a result only with user confirmation. |
+| `plan_attention` | Respect the plan's date, intensity, and capacity limits. Rest or close the plan from explicit feedback. |
+| `no_eligible_task` | Inspect facts, dependencies, and closure criteria. Do not loop proposals or raise intensity automatically. |
 
 After every mutation, run `agent context --json` again. This is the only supported way to advance the workflow state.
 
@@ -94,6 +97,68 @@ Use the full task update API when corrections are needed:
 
 Omit unchanged flags. Never edit `completionPercent` directly; it is derived from weighted leaf progress.
 
+## Continuity
+
+Structured intake is optional: `project add ... --intake-file <json>` accepts `completed`,
+`remaining` (one action per line), `closeCriteria`, and optional `progressEstimate`.
+It is copied into the authoritative `brief.md` JSON block. The estimate is self-reported,
+not computed task progress. Missing facts yield a zero-weight clarification task.
+
+`project capsule <id> --file <json>` saves a confirmed handoff with `summary`,
+`decisions`, `artifacts`, `blocker`, `nextAction`, `notDoing`, optional `taskId`,
+and `updatedAt`. Consult `schemas/capsule.schema.json` before writing the file.
+Use `session close ... --handoff-file <json>` to preserve the re-entry point.
+Partial and checkpoint results never gain percentage from time spent.
+
+Use `session propose ... --project <id>` and `agent context ... --project <id>`
+to retain an explicit project selection. Review a checkpoint's boundaries;
+`session revise <id> --start <action> --completion <criterion> --not-doing <boundary>`
+can calibrate the proposed segment before confirmation.
+
+Use `session pause <id>` / `session resume <id>`. A paused session still owns the
+workspace's one current session. Never rebuild or edit its task graph. If interrupted,
+the desktop restores the last confirmed activity time; it never assumes overnight work.
+
+## Project Decisions And Plans
+
+`project resolve <id> --outcome <closed|parked|waiting|killed|active> --note <reason>`
+records an explicit user decision. `closed` requires `--evidence <text>`,
+`parked` requires `--revisit YYYY-MM-DD`, and `waiting` must name the external
+condition in the note. Returning to `active` is explicit, not automatic on the revisit date.
+Resolution and archiving do not change computed progress.
+
+One optional residency plan groups sessions. Use `plan list`, `plan save --file <json>
+[--id <id>]`, `plan commit <id>`, `plan start <id>`, and `plan close <id> --note <result>`.
+Read `schemas/plan.schema.json` for its fields. Draft/committed plans do not block one-off
+sessions; an active plan enforces selected projects, dates, daily minutes, and intensity.
+Starting and closing require user confirmation. `open plans` opens its desktop surface.
+
+This runtime workflow does not govern explicitly requested development of Los Alamos
+source code itself. Do not mutate real project/session records when developing the product.
+
+## Attention Launcher
+
+`open home` shows the current entrance, with original thoughts kept separate from tasks.
+Use `inbox add --text <verbatim-text> [--session <id>]`, `inbox list`,
+`inbox shelve <id>`, and `inbox restore <id>` for unstructured captures.
+Read `schemas/capture.schema.json`; files and append-only events live under `inbox/`.
+Do not convert every captured thought into an obligation.
+
+`inbox prepare <id> --title <title> --remaining <actions> --closing <criterion>`
+requires user-confirmed remaining actions and a stopping point. Local suggestions only
+extract explicit phrases; they do not replace confirmation or infer a full task graph.
+
+For the shorter start path, call `focus preview --minutes <n> --intensity <level>
+[--project <id>]`. It does not create a session. Present the returned action, criteria,
+boundary, selected project and constraints. Only after the user confirms that exact
+preview, call `focus start` with identical constraints and `--token <preview-token>`.
+A stale token must be reviewed again, never silently replaced to bypass confirmation.
+The operation retains both proposed and started audit events.
+
+During work, `inbox add --session <active-id>` records a distraction without changing the
+active task or timer. The material entrance is user-initiated: never automatically execute
+files or open links from untrusted project descriptions.
+
 ## GUI Control
 
 Open exact surfaces through the same workspace protocol:
@@ -108,6 +173,8 @@ Open exact surfaces through the same workspace protocol:
 ./.los/los open settings --json
 ./.los/los open about --json
 ./.los/los open session <session-id> --json
+./.los/los open plans --json
+./.los/los open home --json
 ```
 
 Use these commands when visual review or user confirmation is useful. CLI and GUI operate on the same authoritative workspace.

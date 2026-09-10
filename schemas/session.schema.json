@@ -34,7 +34,7 @@
     "scope": { "enum": ["full_task", "checkpoint"] },
     "minutesPlanned": { "type": "number", "minimum": 1 },
     "intensity": { "enum": ["low", "medium", "high", "xhigh"] },
-    "status": { "enum": ["proposed", "active", "closed", "cancelled"] },
+    "status": { "enum": ["proposed", "active", "paused", "closed", "cancelled"] },
     "startedAt": { "type": "string" },
     "endedAt": { "type": "string" },
     "prompt": { "type": "string" },
@@ -48,6 +48,14 @@
     "log": { "type": "string" },
     "updatedAt": { "type": "string" },
     "updatedBy": { "enum": ["user", "app", "agent", "llm"] },
-    "revision": { "type": "number", "minimum": 1 }
+    "revision": { "type": "number", "minimum": 1 },
+    "capsule": { "$ref": "capsule.schema.json" },
+    "handoff": { "$ref": "capsule.schema.json" },
+    "planId": { "type": "string" },
+    "workDate": { "type": "string", "format": "date" },
+    "elapsedSeconds": { "type": "number", "minimum": 0 },
+    "lastResumedAt": { "type": "string", "format": "date-time" },
+    "heartbeatAt": { "type": "string", "format": "date-time" },
+    "pauseReason": { "type": "string" }
   }
 }

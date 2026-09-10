@@ -17,6 +17,8 @@
         "project.restored",
         "session.proposed",
         "session.started",
+        "session.paused",
+        "session.resumed",
         "session.cancelled",
         "session.closed",
         "task.updated"
